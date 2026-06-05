@@ -3,6 +3,7 @@ package com.example.translyrical.data.repository
 import android.util.Base64
 import com.example.translyrical.network.SpotifyAuthApi
 import com.example.translyrical.network.SpotifySearchApi
+import com.example.translyrical.BuildConfig
 
 class SpotifyRepository (
     private val authApi: SpotifyAuthApi,
@@ -10,8 +11,8 @@ class SpotifyRepository (
 ) {
     private var cachedToken: String? = null
 
-    private val clientId = "347a7d6ee9454af9bb4ddf9f6e6166f6"
-    private val clientSecret = "0ff10e5f8381486b848e2725661407b9"
+    private val clientId = BuildConfig.SPOTIFY_CLIENT_ID
+    private val clientSecret = BuildConfig.SPOTIFY_CLIENT_SECRET
 
     private suspend fun getValidToken(): String {
         cachedToken?.let { return it }
@@ -43,17 +44,16 @@ class SpotifyRepository (
             null
         }
     }
-}
-
-suspend fun cleanFilename(filename: String): String {
-    return filename
-        .replace(Regex("(?i)\\.mp3"), "")
-        .replace(Regex("(?i)official\\s*video"), "")
-        .replace(Regex("(?i)official\\s*audio"), "")
-        .replace(Regex("(?i)y2mate\\.com\\s*-?\\s*"), "")
-        .replace("_", " ")
-        .replace("-", " ")
-        .trim()
+    private fun cleanFilename(filename: String): String {
+        return filename
+            .replace(Regex("(?i)\\.mp3"), "")
+            .replace(Regex("(?i)official\\s*video"), "")
+            .replace(Regex("(?i)official\\s*audio"), "")
+            .replace(Regex("(?i)y2mate\\.com\\s*-?\\s*"), "")
+            .replace("_", " ")
+            .replace("-", " ")
+            .trim()
+    }
 }
 
 data class SpotifyMetadata(val title: String, val artist: String, val coverArtUrl: String?)

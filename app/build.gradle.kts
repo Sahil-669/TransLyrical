@@ -1,8 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
 }
+
+val keystorePropertiesFile = rootProject.file("local.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(keystorePropertiesFile.inputStream())
+}
+val spotifyId = keystoreProperties.getProperty("SPOTIFY_CLIENT_ID") ?: ""
+val spotifySecret = keystoreProperties.getProperty("SPOTIFY_CLIENT_SECRET") ?: ""
 
 android {
     namespace = "com.example.translyrical"
@@ -20,6 +30,8 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyId\"")
+        buildConfigField("String", "SPOTIFY_CLIENT_SECRET", "\"$spotifySecret\"")
     }
 
     buildTypes {
@@ -37,6 +49,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
