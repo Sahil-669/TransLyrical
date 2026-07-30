@@ -10,18 +10,29 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,8 +50,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.translyrical.data.repository.SpotifyRepository
 import com.example.translyrical.domain.LyricTranslator
@@ -217,8 +230,104 @@ fun AddSongsScreen(onAudioSelected: (Uri) -> Unit) {
 
 @Composable
 fun LibraryScreen() {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Library Screen (Coming Soon)", color = Color.White.copy(alpha = 0.7f))
+    val dummySongs = listOf(
+        SongMetadata("Blinding Lights", "The Weeknd"),
+        SongMetadata("Shape of You", "Ed Sheeran"),
+        SongMetadata("Bohemian Rhapsody", "Queen"),
+        SongMetadata("Starboy", "The Weeknd"),
+        SongMetadata("Hotel California", "Eagles")
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = 4.dp, start = 20.dp, end = 20.dp)
+    ) {
+        Text(
+            text = "Your Library",
+            style = MaterialTheme.typography.headlineLarge,
+            color = Color.White,
+            modifier = Modifier.padding(bottom = 24.dp, start = 4.dp)
+        )
+
+        if (dummySongs.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Your library is empty.\nSwipe right to add a song!",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White.copy(alpha = 0.6f),
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else {
+            LazyColumn( verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 100.dp)
+            ) {
+                items(dummySongs) { song ->
+                    SongListItem(
+                        song = song,
+                        onClick = {
+                            println("Clicked ${song.title}")
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SongListItem(song: SongMetadata, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            // This is the "Glass" effect — 10% opacity white
+            .background(Color.White.copy(alpha = 0.1f))
+            .clickable { onClick() }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Left Icon
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.MusicNote,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.9f)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(16.dp))
+
+        // Song Details (Title and Artist)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = song.artist,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.7f)
+            )
+        }
+
+        // Right Play Icon
+        Icon(
+            imageVector = Icons.Rounded.PlayArrow,
+            contentDescription = "Play",
+            tint = Color.White.copy(alpha = 0.8f)
+        )
     }
 }
 
