@@ -120,7 +120,7 @@ fun RippleBackground(
                     drawRect(shaderBrush)
                 }
         ) {
-
+            content()
         }
     } else {
         Box(
