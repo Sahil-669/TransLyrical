@@ -14,6 +14,7 @@ if (keystorePropertiesFile.exists()) {
 }
 val spotifyId = keystoreProperties.getProperty("SPOTIFY_CLIENT_ID") ?: ""
 val spotifySecret = keystoreProperties.getProperty("SPOTIFY_CLIENT_SECRET") ?: ""
+val supabaseKey = keystoreProperties.getProperty("SUPABASE_KEY_SECRET") ?: ""
 
 android {
     namespace = "com.example.translyrical"
@@ -29,6 +30,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyId\"")
         buildConfigField("String", "SPOTIFY_CLIENT_SECRET", "\"$spotifySecret\"")
+        buildConfigField("String", "SUPABASE_KEY_SECRET", "\"$supabaseKey\"")
     }
 
     buildTypes {

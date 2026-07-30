@@ -1,6 +1,7 @@
 package com.example.translyrical.di
 
 import androidx.room.Room
+import com.example.translyrical.BuildConfig
 import com.example.translyrical.data.local.SlangDatabase
 import com.example.translyrical.data.repository.CloudSongRepository
 import com.example.translyrical.data.repository.CloudSongRepositoryImpl
@@ -77,7 +78,7 @@ val appModule = module {
     single<SupabaseClient> {
         createSupabaseClient(
             supabaseUrl = "https://ffldywbvaxusbiqlwruc.supabase.co",
-            supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZmbGR5d2J2YXh1c2JpcWx3cnVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzMjUwODgsImV4cCI6MjEwMDkwMTA4OH0.Tw9BweTATkGNijoXywgxJYH6Xl9rZmF_bCwECipx5_c"
+            supabaseKey = BuildConfig.SUPABASE_KEY_SECRET
         ) {
             install(Storage)
             install(Auth)
