@@ -33,6 +33,7 @@ import com.example.translyrical.parser.LrcParser
 import com.example.translyrical.parser.LyricLine
 import com.example.translyrical.player.rememberLyricPlayer
 import com.example.translyrical.ui.LyricScreen
+import com.example.translyrical.ui.RippleBackground
 import org.koin.compose.koinInject
 
 class MainActivity : ComponentActivity() {
@@ -76,7 +77,9 @@ class MainActivity : ComponentActivity() {
                         ?: ""
 
                     val spotifyMeta = spotifyRepository.fetchCoverArtAndMeta(searchString)
-                    currentTitle = spotifyMeta?.title?: localMeta?.title?: audioUri!!.lastPathSegment?: "Unknown Track"
+                    currentTitle =
+                        spotifyMeta?.title ?: localMeta?.title ?: audioUri!!.lastPathSegment
+                                ?: "Unknown Track"
                     currentArtist = spotifyMeta?.artist ?: localMeta?.artist ?: "Unknown Artist"
                     currentCover = spotifyMeta?.coverArtUrl
 
@@ -85,10 +88,11 @@ class MainActivity : ComponentActivity() {
 
                         lyricsList = LrcParser.parse(response.syncedLyrics)
 
-                        val uniqueId = "${currentTitle}_${currentArtist}".replace(" ", "_").lowercase()
+                        val uniqueId =
+                            "${currentTitle}_${currentArtist}".replace(" ", "_").lowercase()
                         translatedLyrics = lyricTranslator.getFullSongTranslation(
-                                uniqueId,
-                                lyricsList
+                            uniqueId,
+                            lyricsList
                         )
                     }
 
@@ -99,43 +103,53 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            if (audioUri == null) {
-                Box(modifier = Modifier.fillMaxSize().background(Color(0xFF121212)), contentAlignment = Alignment.Center) {
-                    Button(
-                        onClick = {
-                            audioPickerLauncher.launch("audio/*")
-                        }
+            RippleBackground(
+                iconRes = R.drawable.ic_music_note
+            ) {
+                if (audioUri == null) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("Select MP3 file")
-                    }
-                }
-            } else if (lyricsList.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().background(Color(0xFF121212)), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (isFetching) {
-                            Text("Fetching Synced Lyrics...", color = Color.White)
-                        } else {
-                            Text(
-                                "No lyrics found online.",
-                                color = Color.Gray,
-                                modifier = Modifier.padding(bottom = 16.dp)
-                            )
+                        Button(
+                            onClick = {
+                                audioPickerLauncher.launch("audio/*")
+                            }
+                        ) {
+                            Text("Select MP3 file")
                         }
                     }
-                }
-            } else {
-                val playerState = rememberLyricPlayer(
-                    lyricsList,
-                    audioUri
-                )
+                } else if (lyricsList.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            if (isFetching) {
+                                Text("Fetching Synced Lyrics...", color = Color.White)
+                            } else {
+                                Text(
+                                    "No lyrics found online.",
+                                    color = Color.Gray,
+                                    modifier = Modifier.padding(bottom = 16.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    val playerState = rememberLyricPlayer(
+                        lyricsList,
+                        audioUri
+                    )
 
-                LyricScreen(
-                    playerState,
-                    translatedLyrics,
-                    currentTitle,
-                    currentArtist,
-                    currentCover
-                )
+                    LyricScreen(
+                        playerState,
+                        translatedLyrics,
+                        currentTitle,
+                        currentArtist,
+                        currentCover
+                    )
+                }
             }
         }
     }

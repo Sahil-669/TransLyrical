@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.google.services)
 }
 
 val keystorePropertiesFile = rootProject.file("local.properties")
@@ -16,11 +17,7 @@ val spotifySecret = keystoreProperties.getProperty("SPOTIFY_CLIENT_SECRET") ?: "
 
 android {
     namespace = "com.example.translyrical"
-    compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.example.translyrical"
@@ -83,4 +80,9 @@ dependencies {
     implementation(libs.coroutines.play.services)
     implementation(libs.androidx.material.icons.extended)
     ksp(libs.room.compiler)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.firestore)
+    implementation(libs.supabase.auth)
+    implementation(libs.supabase.storage)
+    implementation(libs.ktor.client.android)
 }
