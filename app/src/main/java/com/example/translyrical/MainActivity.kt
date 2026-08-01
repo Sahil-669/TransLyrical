@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -43,6 +44,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,15 +58,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.translyrical.data.repository.SpotifyRepository
+import com.example.translyrical.domain.CloudSong
 import com.example.translyrical.domain.LyricTranslator
 import com.example.translyrical.network.LrcLibApi
 import com.example.translyrical.parser.LrcParser
 import com.example.translyrical.parser.LyricLine
 import com.example.translyrical.player.rememberLyricPlayer
+import com.example.translyrical.ui.CloudSongViewModel
 import com.example.translyrical.ui.LyricScreen
 import com.example.translyrical.ui.RippleBackground
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.launch
+import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
+import androidx.core.net.toUri
+import coil3.compose.AsyncImage
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,6 +91,8 @@ fun TransLyrical() {
     val lyricTranslator = koinInject<LyricTranslator>()
     val lrcLibApi = koinInject<LrcLibApi>()
     val spotifyRepository = koinInject<SpotifyRepository>()
+    val cloudSongViewModel = koinViewModel<CloudSongViewModel>()
+    val uiState by cloudSongViewModel.uiState.collectAsState()
 
     var audioUri by remember { mutableStateOf<Uri?>(null) }
     var lyricsList by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
@@ -93,10 +104,29 @@ fun TransLyrical() {
 
     LaunchedEffect(audioUri) {
         if (audioUri == null) return@LaunchedEffect
+        if (audioUri!!.scheme?.startsWith("http") == true) return@LaunchedEffect
 
         isFetching = true
         try {
             val localMeta = extractMetadata(context, audioUri!!)
+
+            val tempTitle = localMeta?.title?: audioUri!!.lastPathSegment ?: "Unknown Track"
+            val tempArtist = localMeta?.artist ?: "Unknown Artist"
+            val existingSong = uiState.songs.find { cloudSong ->
+                cloudSong.title.equals(tempTitle, ignoreCase = true) &&
+                        cloudSong.artist.equals(tempArtist, ignoreCase = true)
+            }
+            if (existingSong != null) {
+                lyricsList = existingSong.syncedLyricsJson.toLyricsList()
+                translatedLyrics = existingSong.translatedLyricsJson.toLyricsList()
+                currentTitle = existingSong.title
+                currentArtist = existingSong.artist
+                currentCover = existingSong.coverUrl
+                isFetching = false
+                Log.d("TransLyrical", "Song already in library, skipping upload.")
+                return@LaunchedEffect
+            }
+
             val searchString = localMeta?.let { "${it.title} ${it.artist}" }
                 ?: audioUri!!.lastPathSegment
                 ?: ""
@@ -109,11 +139,27 @@ fun TransLyrical() {
             val response = lrcLibApi.getLyrics(currentTitle, currentArtist)
             if (response.syncedLyrics != null) {
                 lyricsList = LrcParser.parse(response.syncedLyrics)
-                val uniqueId = "${currentTitle}_${currentArtist}".replace(" ", "_").lowercase()
-                translatedLyrics = lyricTranslator.getFullSongTranslation(uniqueId, lyricsList)
+                translatedLyrics = lyricTranslator.getFullSongTranslation(lyricsList)
+
+                val audioBytes = context.contentResolver.openInputStream(audioUri!!)?.use { inputStream ->
+                    inputStream.readBytes()
+                }
+
+                if (audioBytes != null) {
+                    cloudSongViewModel.uploadSong(
+                        title = currentTitle,
+                        artist = currentArtist,
+                        audioBytes = audioBytes,
+                        coverUrl = currentCover,
+                        syncedLyrics = lyricsList,
+                        translatedLyrics = translatedLyrics
+                    )
+                } else {
+                    Log.e("TransLyricalFetch", "Failed to extract bytes from URI: $audioUri")
+                }
             }
         } catch (e: Exception) {
-            print("❌ Fetch Pipeline Failed: ${e.message}")
+            Log.e("TransLyricalFetch", "Pipeline critical failure", e)
         } finally {
             isFetching = false
         }
@@ -122,12 +168,22 @@ fun TransLyrical() {
     RippleBackground(iconRes = R.drawable.ic_music_note) {
         if (audioUri == null) {
             MainScreen(
+                cloudViewModel = cloudSongViewModel,
                 onAudioSelected = { selectedUri ->
                     isFetching = true
                     audioUri = selectedUri
                     lyricsList = emptyList()
                     translatedLyrics = null
                     currentCover = null
+                },
+                onCloudSongSelected = { cloudSong ->
+                    audioUri = cloudSong.audioUrl.toUri()
+                    lyricsList = cloudSong.syncedLyricsJson.toLyricsList()
+                    translatedLyrics = cloudSong.translatedLyricsJson.toLyricsList()
+                    currentTitle = cloudSong.title
+                    currentArtist = cloudSong.artist
+                    currentCover = cloudSong.coverUrl
+                    isFetching = false
                 }
             )
         } else if (lyricsList.isEmpty()) {
@@ -161,7 +217,11 @@ fun TransLyrical() {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MainScreen(onAudioSelected: (Uri) -> Unit) {
+fun MainScreen(
+    cloudViewModel: CloudSongViewModel,
+    onAudioSelected: (Uri) -> Unit,
+    onCloudSongSelected: (CloudSong) -> Unit
+) {
     val pagerState = rememberPagerState(pageCount = { 2 })
     val coroutineScope = rememberCoroutineScope()
 
@@ -190,7 +250,7 @@ fun MainScreen(onAudioSelected: (Uri) -> Unit) {
         ) { page ->
             when (page) {
                 0 -> AddSongsScreen(onAudioSelected)
-                1 -> LibraryScreen()
+                1 -> LibraryScreen(cloudViewModel, onCloudSongSelected)
             }
         }
     }
@@ -229,14 +289,12 @@ fun AddSongsScreen(onAudioSelected: (Uri) -> Unit) {
 }
 
 @Composable
-fun LibraryScreen() {
-    val dummySongs = listOf(
-        SongMetadata("Blinding Lights", "The Weeknd"),
-        SongMetadata("Shape of You", "Ed Sheeran"),
-        SongMetadata("Bohemian Rhapsody", "Queen"),
-        SongMetadata("Starboy", "The Weeknd"),
-        SongMetadata("Hotel California", "Eagles")
-    )
+fun LibraryScreen(
+    viewModel: CloudSongViewModel,
+    onCloudSongSelected: (CloudSong) -> Unit
+    ) {
+
+    val uiState by viewModel.uiState.collectAsState()
 
     Column(
         modifier = Modifier
@@ -250,13 +308,25 @@ fun LibraryScreen() {
             modifier = Modifier.padding(bottom = 24.dp, start = 4.dp)
         )
 
-        if (dummySongs.isEmpty()) {
+        if (uiState.isLoading && uiState.songs.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Your library is empty.\nSwipe right to add a song!",
+                    text = "Your library is empty.\nSwipe left or click the + button to add a song!",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White.copy(alpha = 0.6f),
+                    textAlign = TextAlign.Center
+                )
+            }
+        } else if (uiState.songs.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Your library is empty.\nSwipe left or click the + button to add a song!",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center
@@ -266,12 +336,10 @@ fun LibraryScreen() {
             LazyColumn( verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(bottom = 100.dp)
             ) {
-                items(dummySongs) { song ->
+                items(uiState.songs) { song ->
                     SongListItem(
                         song = song,
-                        onClick = {
-                            println("Clicked ${song.title}")
-                        }
+                        onClick = { onCloudSongSelected(song) }
                     )
                 }
             }
@@ -280,34 +348,41 @@ fun LibraryScreen() {
 }
 
 @Composable
-fun SongListItem(song: SongMetadata, onClick: () -> Unit) {
+fun SongListItem(song: CloudSong, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            // This is the "Glass" effect — 10% opacity white
             .background(Color.White.copy(alpha = 0.1f))
             .clickable { onClick() }
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left Icon
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.MusicNote,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.9f)
+        if (song.coverUrl != null) {
+            AsyncImage(
+                model = song.coverUrl,
+                contentDescription = "Album art for ${song.title}",
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
             )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.9f)
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(16.dp))
 
-        // Song Details (Title and Artist)
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = song.title,
@@ -322,7 +397,6 @@ fun SongListItem(song: SongMetadata, onClick: () -> Unit) {
             )
         }
 
-        // Right Play Icon
         Icon(
             imageVector = Icons.Rounded.PlayArrow,
             contentDescription = "Play",
@@ -350,3 +424,14 @@ fun extractMetadata(context: Context, uri: Uri): SongMetadata? {
 }
 
 data class SongMetadata(val title: String, val artist: String)
+
+fun String?.toLyricsList(): List<LyricLine> {
+    if (this.isNullOrBlank()) return emptyList()
+    return try {
+        val listType = object : TypeToken<List<LyricLine>>() {}.type
+        Gson().fromJson(this, listType)
+    } catch (e: Exception) {
+        Log.e("TransLyricalParse", "Failed to deserialize lyrics", e)
+        emptyList()
+    }
+}

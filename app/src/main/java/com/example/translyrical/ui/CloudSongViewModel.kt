@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.translyrical.data.repository.CloudSongRepository
 import com.example.translyrical.domain.CloudSong
+import com.example.translyrical.extractMetadata
+import com.example.translyrical.parser.LyricLine
+import com.google.gson.Gson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,6 +23,8 @@ class CloudSongViewModel(
 ): ViewModel() {
     private val _uiState = MutableStateFlow(CloudSongUiState())
     val uiState: StateFlow<CloudSongUiState> = _uiState.asStateFlow()
+
+    private val gson = Gson()
 
     init {
         loadSongs()
@@ -46,11 +51,28 @@ class CloudSongViewModel(
         }
     }
 
-    fun uploadSong(title: String, artist: String, audioBytes: ByteArray) {
+    fun uploadSong(
+        title: String,
+        artist: String,
+        audioBytes: ByteArray,
+        coverUrl: String?,
+        syncedLyrics: List<LyricLine>,
+        translatedLyrics: List<LyricLine>?
+        ) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
-            repository.uploadCloudSong(title, artist, audioBytes).fold(
+            val syncedJson = gson.toJson(syncedLyrics)
+            val translatedJson = translatedLyrics?.let { gson.toJson(it) }
+
+            repository.uploadCloudSong(
+                title,
+                artist,
+                audioBytes,
+                coverUrl,
+                syncedJson,
+                translatedJson
+            ).fold(
                 onSuccess = {
                     loadSongs()
                 },

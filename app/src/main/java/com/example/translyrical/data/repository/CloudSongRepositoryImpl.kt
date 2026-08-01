@@ -1,60 +1,60 @@
 package com.example.translyrical.data.repository
 
+import android.util.Log
 import com.example.translyrical.domain.CloudSong
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.storage.storage
-import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
 class CloudSongRepositoryImpl(
-    private val firestore: FirebaseFirestore,
-    private val supabaseClient: SupabaseClient
+    private val supabase: SupabaseClient
 ) : CloudSongRepository{
-    private val collectionRef = firestore.collection("cloud_songs")
 
     override suspend fun uploadCloudSong(
         title: String,
         artist: String,
-        audioBytes: ByteArray
+        audioBytes: ByteArray,
+        coverUrl: String?,
+        syncedLyricsJson: String?,
+        translatedLyricsJson: String?
     ): Result<Unit> {
         return try {
             val fileName = "${UUID.randomUUID()}.mp3"
+            supabase.storage["songs"].upload(fileName, audioBytes) {
+                upsert = false
+            }
 
-            val bucket = supabaseClient.storage.from("songs")
-            bucket.upload(path = fileName, data = audioBytes)
+            val publicAudioUrl = supabase.storage["songs"].publicUrl(fileName)
 
-            val publicAudioUrl = bucket.publicUrl(fileName)
-
-            val cloudSongDto = CloudSongDto(
+            val songDto = CloudSongDto(
                 title = title,
                 artist = artist,
                 audioUrl = publicAudioUrl,
+                coverUrl = coverUrl,
+                syncedLyricsJson = syncedLyricsJson,
+                translatedLyricsJson = translatedLyricsJson,
                 timestamp = System.currentTimeMillis()
             )
-            collectionRef.add(cloudSongDto).await()
+            supabase.postgrest["songs"].insert(songDto)
             Result.success(Unit)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("SupabaseUpload", "Pipeline failure: ${e.message}", e)
             Result.failure(e)
         }
     }
 
     override suspend fun getCloudSongs(): Result<List<CloudSong>> {
         return try {
-            val snapshot = collectionRef
-                .orderBy("timestamp", Query.Direction.DESCENDING)
-                .get()
-                .await()
+            val dtos = supabase.postgrest["songs"]
+                .select()
+                .decodeList<CloudSongDto>()
 
-            val cloudSongs = snapshot.documents.mapNotNull { document ->
-                val dto = document.toObject(CloudSongDto::class.java)
-                dto?.toDomain(documentId = document.id)
-            }
-            Result.success(cloudSongs)
+            val songs = dtos.map { it.toDomain() }
+
+            Result.success(songs)
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("SupabaseFetch", "Failed to fetch library: ${e.message}", e)
             Result.failure(e)
         }
     }

@@ -4,7 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.google.services)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 val keystorePropertiesFile = rootProject.file("local.properties")
@@ -82,9 +82,9 @@ dependencies {
     implementation(libs.coroutines.play.services)
     implementation(libs.androidx.material.icons.extended)
     ksp(libs.room.compiler)
-    implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.firestore)
     implementation(libs.supabase.auth)
     implementation(libs.supabase.storage)
     implementation(libs.ktor.client.android)
+    implementation(libs.supabase.postgrest)
+    implementation(libs.kotlinx.serialization)
 }
