@@ -10,6 +10,11 @@ interface LrcLibApi {
         @Query("track_name") trackName: String,
         @Query("artist_name") artistName: String
     ): LrcLibResponse
+
+    @GET("api/search")
+    suspend fun searchLyrics(
+        @Query("q") query: String
+    ): List<LrcLibResponse>
 }
 
 data class LrcLibResponse(

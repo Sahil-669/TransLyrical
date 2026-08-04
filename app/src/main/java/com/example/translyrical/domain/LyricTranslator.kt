@@ -1,36 +1,67 @@
 package com.example.translyrical.domain
 
-import com.example.translyrical.network.TranslationApi
+import android.util.Log
+import com.example.translyrical.BuildConfig
+import com.example.translyrical.network.GeminiApi
+import com.example.translyrical.network.GeminiContent
+import com.example.translyrical.network.GeminiPart
+import com.example.translyrical.network.GeminiRequest
 import com.example.translyrical.parser.LyricLine
 
-
 class LyricTranslator (
-    private val api: TranslationApi,
+    private val geminiApi: GeminiApi
 ) {
-    suspend fun getFullSongTranslation(
-        originalLyrics: List<LyricLine>
-    ) : List<LyricLine> {
+    suspend fun getFullSongTranslation(originalLyrics: List<LyricLine>): List<LyricLine>? {
+        if (originalLyrics.isEmpty()) return null
 
-        val finalTranslatedList = mutableListOf<LyricLine>()
-        val chunks = originalLyrics.chunked(8)
+        val rawLyricsText = originalLyrics.mapIndexed { index, line ->
+            "$index| ${line.text}"
+        }.joinToString("\n")
 
-        for (chunk in chunks) {
-            val bulkText = chunk.joinToString("@@@") { line -> line.text }
+        val promptText = """
+            Translate the following song lyrics into English.
+            Rules:
+            1. The text may be in Romanized Hindi (Hinglish), standard Spanish, slang, or mixed languages.
+            2. I have numbered each line (e.g., "0| text"). You MUST return the exact same line numbers in your response.
+            3. If a line is empty, return just the line number and a pipe (e.g., "5| ").
+            4. Return ONLY the numbered translations. No introductions.
+            
+            Lyrics:
+            $rawLyricsText
+        """.trimIndent()
+        val request = GeminiRequest(
+            contents = listOf(GeminiContent(listOf(GeminiPart(promptText))))
+        )
+        return try {
+            val response = geminiApi.translateLyrics(BuildConfig.GEMINI_API_KEY, request)
+            val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+            if (responseText.isNullOrBlank()) return null
+            val translatedLines = responseText.trim().split("\n")
+                .mapNotNull { line ->
+                    val parts = line.split("|", limit = 2)
+                    if (parts.size == 2) {
+                        val index = parts[0].trim().toIntOrNull()
+                        val text = parts[1].trim()
+                        if (index != null) index to text else null
+                    } else {
+                        null
+                    }
+                }.toMap()
 
-            try {
-                val response = api.translateText(textToTranslate = bulkText)
-                val bulkTranslatedText = response.get(0).asJsonArray.get(0).asJsonArray.get(0).asString
-
-                val translatedStrings = bulkTranslatedText.split(Regex("\\s*@@@\\s*"))
-                chunk.forEachIndexed { index, originalLine ->
-                    val enText = translatedStrings.getOrNull(index)?.trim() ?: originalLine.text
-                    finalTranslatedList.add(LyricLine(originalLine.startTimeMs, enText))
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                finalTranslatedList.addAll(chunk)
+            originalLyrics.mapIndexed { index, originalLine ->
+                val englishText = translatedLines[index] ?: originalLine.text
+                LyricLine(
+                    startTimeMs = originalLine.startTimeMs,
+                    text = englishText
+                )
             }
+        } catch (e: retrofit2.HttpException) {
+            val errorBody = e.response()?.errorBody()?.string()
+            Log.e("LyricTranslator", "Gemini HTTP ${e.code()}: $errorBody")
+            null
+        } catch (e: Exception) {
+            Log.e("LyricTranslator", "Gemini API failed", e)
+            null
         }
-        return finalTranslatedList
     }
 }

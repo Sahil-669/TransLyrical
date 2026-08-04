@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -37,11 +38,13 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -73,7 +76,12 @@ import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import androidx.core.net.toUri
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import coil3.compose.AsyncImage
+import com.example.translyrical.network.LrcLibResponse
+import retrofit2.HttpException
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,6 +101,7 @@ fun TransLyrical() {
     val spotifyRepository = koinInject<SpotifyRepository>()
     val cloudSongViewModel = koinViewModel<CloudSongViewModel>()
     val uiState by cloudSongViewModel.uiState.collectAsState()
+    val navController = rememberNavController()
 
     var audioUri by remember { mutableStateOf<Uri?>(null) }
     var lyricsList by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
@@ -101,12 +110,14 @@ fun TransLyrical() {
     var currentTitle by remember { mutableStateOf("Unknown Track") }
     var currentArtist by remember { mutableStateOf("Unknown Artist") }
     var currentCover by remember { mutableStateOf<String?>(null) }
+    var fetchError by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(audioUri) {
         if (audioUri == null) return@LaunchedEffect
         if (audioUri!!.scheme?.startsWith("http") == true) return@LaunchedEffect
 
         isFetching = true
+        fetchError = null
         try {
             val localMeta = extractMetadata(context, audioUri!!)
 
@@ -123,94 +134,133 @@ fun TransLyrical() {
                 currentArtist = existingSong.artist
                 currentCover = existingSong.coverUrl
                 isFetching = false
-                Log.d("TransLyrical", "Song already in library, skipping upload.")
+                navController.navigate("player") { popUpTo("home") }
                 return@LaunchedEffect
             }
 
-            val searchString = localMeta?.let { "${it.title} ${it.artist}" }
-                ?: audioUri!!.lastPathSegment
-                ?: ""
+            val rawFileName = getFileNameFromUri(context, audioUri!!)
+            val cleanFileName = rawFileName.substringBeforeLast(".")
+            var finalLrcResponse : LrcLibResponse?
+            currentTitle = localMeta?.title ?: cleanFileName
+            currentArtist = localMeta?.artist ?: "Unknown Artist"
+            val findBestMatch = { results: List<LrcLibResponse> ->
+                results
+                    .filter { !it.syncedLyrics.isNullOrBlank() }
+                    .take(8)
+                    .minByOrNull { it.syncedLyrics!!.length }
+            }
+            try {
+                finalLrcResponse = lrcLibApi.getLyrics(currentTitle, currentArtist)
+            } catch (e: HttpException) {
+                if (e.code() == 404) {
+                    var searchResults = lrcLibApi.searchLyrics("$currentTitle $currentArtist")
+                    finalLrcResponse = findBestMatch(searchResults)
 
-            val spotifyMeta = spotifyRepository.fetchCoverArtAndMeta(searchString)
-            currentTitle = spotifyMeta?.title ?: localMeta?.title ?: audioUri!!.lastPathSegment ?: "Unknown Track"
-            currentArtist = spotifyMeta?.artist ?: localMeta?.artist ?: "Unknown Artist"
-            currentCover = spotifyMeta?.coverArtUrl
-
-            val response = lrcLibApi.getLyrics(currentTitle, currentArtist)
-            if (response.syncedLyrics != null) {
-                lyricsList = LrcParser.parse(response.syncedLyrics)
-                translatedLyrics = lyricTranslator.getFullSongTranslation(lyricsList)
-
-                val audioBytes = context.contentResolver.openInputStream(audioUri!!)?.use { inputStream ->
-                    inputStream.readBytes()
+                    if (finalLrcResponse == null && cleanFileName.isNotBlank()) {
+                        searchResults = lrcLibApi.searchLyrics(cleanFileName)
+                        finalLrcResponse = findBestMatch(searchResults)
+                    }
+                } else {
+                    throw e
                 }
+            }
+            if (finalLrcResponse != null) {
+                currentTitle = finalLrcResponse.trackName.ifBlank { cleanFileName }
+                currentArtist = finalLrcResponse.artistName.ifBlank { "Unknown Artist" }
+            } else {
+                currentTitle = cleanFileName
+            }
+            val spotifyMeta = spotifyRepository.fetchCoverArtAndMeta("$currentTitle $currentArtist")
+            currentCover = spotifyMeta?.coverArtUrl
+            currentTitle = spotifyMeta?.title ?: currentTitle
+            currentArtist = spotifyMeta?.artist ?: currentArtist
 
+            if (finalLrcResponse?.syncedLyrics != null ) {
+                lyricsList = LrcParser.parse(finalLrcResponse.syncedLyrics)
+                translatedLyrics = lyricTranslator.getFullSongTranslation(lyricsList)
+                val audioBytes = context.contentResolver.openInputStream(audioUri!!)?.use { it.readBytes() }
                 if (audioBytes != null) {
                     cloudSongViewModel.uploadSong(
-                        title = currentTitle,
-                        artist = currentArtist,
-                        audioBytes = audioBytes,
-                        coverUrl = currentCover,
-                        syncedLyrics = lyricsList,
-                        translatedLyrics = translatedLyrics
+                        title = currentTitle, artist = currentArtist, audioBytes = audioBytes,
+                        coverUrl = currentCover, syncedLyrics = lyricsList, translatedLyrics = translatedLyrics
                     )
-                } else {
-                    Log.e("TransLyricalFetch", "Failed to extract bytes from URI: $audioUri")
                 }
+                isFetching = false
+                navController.navigate("player") { popUpTo("home") }
+            } else {
+                fetchError = "No lyrics found online for $currentTitle"
             }
         } catch (e: Exception) {
             Log.e("TransLyricalFetch", "Pipeline critical failure", e)
+            fetchError = "An error occurred while loading the song."
         } finally {
             isFetching = false
         }
     }
 
     RippleBackground(iconRes = R.drawable.ic_music_note) {
-        if (audioUri == null) {
-            MainScreen(
-                cloudViewModel = cloudSongViewModel,
-                onAudioSelected = { selectedUri ->
-                    isFetching = true
-                    audioUri = selectedUri
-                    lyricsList = emptyList()
-                    translatedLyrics = null
-                    currentCover = null
-                },
-                onCloudSongSelected = { cloudSong ->
-                    audioUri = cloudSong.audioUrl.toUri()
-                    lyricsList = cloudSong.syncedLyricsJson.toLyricsList()
-                    translatedLyrics = cloudSong.translatedLyricsJson.toLyricsList()
-                    currentTitle = cloudSong.title
-                    currentArtist = cloudSong.artist
-                    currentCover = cloudSong.coverUrl
-                    isFetching = false
-                }
-            )
-        } else if (lyricsList.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (isFetching) {
-                        CircularProgressIndicator(color = Color.White)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("Fetching Synced Lyrics...", color = Color.White)
-                    } else {
-                        Text(
-                            "No lyrics found online.",
-                            color = Color.White.copy(alpha = 0.7f),
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        )
-                        Button(onClick = { audioUri = null }) {
-                            Text("Go Back")
+        NavHost(navController = navController, startDestination = "home") {
+            composable("home") {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    MainScreen(
+                        cloudViewModel = cloudSongViewModel,
+                        onAudioSelected = { selectedUri ->
+                            audioUri = null
+                            audioUri = selectedUri
+                            lyricsList = emptyList()
+                            translatedLyrics = null
+                            currentCover = null
+                            fetchError = null
+                        },
+                        onCloudSongSelected = { cloudSong ->
+                            audioUri = cloudSong.audioUrl.toUri()
+                            lyricsList = cloudSong.syncedLyricsJson.toLyricsList()
+                            translatedLyrics = cloudSong.translatedLyricsJson.toLyricsList()
+                            currentTitle = cloudSong.title
+                            currentArtist = cloudSong.artist
+                            currentCover = cloudSong.coverUrl
+                            isFetching = false
+                            navController.navigate("player") { popUpTo("home") }
+                        }
+                    )
+                    if (isFetching || fetchError != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = .8f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                if (isFetching) {
+                                    CircularProgressIndicator(color = Color.White)
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text("Fetching Synced Lyrics...", color = Color.White)
+                                } else if (fetchError != null) {
+                                    Text(
+                                        text = fetchError!!,
+                                        color = Color.White.copy(0.7f),
+                                        modifier = Modifier.padding(bottom = 16.dp)
+                                    )
+                                    Button(
+                                        onClick = {
+                                            fetchError = null
+                                            audioUri = null
+                                        }
+                                    ) {
+                                        Text("Dismiss")
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
-        } else {
-            val playerState = rememberLyricPlayer(lyricsList, audioUri)
-            LyricScreen(playerState, translatedLyrics, currentTitle, currentArtist, currentCover)
+            composable("player") {
+                val playerState = rememberLyricPlayer(lyricsList, audioUri)
+                LyricScreen(playerState, translatedLyrics, currentTitle, currentArtist, currentCover)
+            }
         }
     }
 }
@@ -288,6 +338,7 @@ fun AddSongsScreen(onAudioSelected: (Uri) -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     viewModel: CloudSongViewModel,
@@ -308,39 +359,35 @@ fun LibraryScreen(
             modifier = Modifier.padding(bottom = 24.dp, start = 4.dp)
         )
 
-        if (uiState.isLoading && uiState.songs.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Your library is empty.\nSwipe left or click the + button to add a song!",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White.copy(alpha = 0.6f),
-                    textAlign = TextAlign.Center
-                )
-            }
-        } else if (uiState.songs.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "Your library is empty.\nSwipe left or click the + button to add a song!",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White.copy(alpha = 0.6f),
-                    textAlign = TextAlign.Center
-                )
-            }
-        } else {
-            LazyColumn( verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(bottom = 100.dp)
-            ) {
-                items(uiState.songs) { song ->
-                    SongListItem(
-                        song = song,
-                        onClick = { onCloudSongSelected(song) }
+        PullToRefreshBox(
+            isRefreshing = uiState.isLoading,
+            onRefresh = { viewModel.loadSongs() },
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (uiState.songs.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Your library is empty.\nSwipe left or click the + button to add a song!",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Color.White.copy(alpha = 0.6f),
+                        textAlign = TextAlign.Center
                     )
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(bottom = 100.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(uiState.songs) { song ->
+                        SongListItem(
+                            song = song,
+                            onClick = { onCloudSongSelected(song) }
+                        )
+                    }
                 }
             }
         }
@@ -434,4 +481,26 @@ fun String?.toLyricsList(): List<LyricLine> {
         Log.e("TransLyricalParse", "Failed to deserialize lyrics", e)
         emptyList()
     }
+}
+
+fun getFileNameFromUri(context: Context, uri: Uri): String {
+    var result: String? = null
+    if (uri.scheme == "content") {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index != -1) {
+                    result = cursor.getString(index)
+                }
+            }
+        }
+    }
+    if (result == null) {
+        result = uri.path
+        val cut = result?.lastIndexOf("/")?: -1
+        if (cut != -1) {
+            result = result?.substring(cut + 1)
+        }
+    }
+    return result ?: "Unknown"
 }

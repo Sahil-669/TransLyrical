@@ -3,7 +3,6 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.serialization)
 }
 
@@ -15,6 +14,7 @@ if (keystorePropertiesFile.exists()) {
 val spotifyId = keystoreProperties.getProperty("SPOTIFY_CLIENT_ID") ?: ""
 val spotifySecret = keystoreProperties.getProperty("SPOTIFY_CLIENT_SECRET") ?: ""
 val supabaseKey = keystoreProperties.getProperty("SUPABASE_KEY_SECRET") ?: ""
+val geminiKey = keystoreProperties.getProperty("GEMINI_API_KEY") ?: ""
 
 android {
     namespace = "com.example.translyrical"
@@ -31,6 +31,7 @@ android {
         buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyId\"")
         buildConfigField("String", "SPOTIFY_CLIENT_SECRET", "\"$spotifySecret\"")
         buildConfigField("String", "SUPABASE_KEY_SECRET", "\"$supabaseKey\"")
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
     }
 
     buildTypes {
@@ -77,14 +78,12 @@ dependencies {
     implementation(libs.bundles.media3)
     implementation(libs.bundles.networking)
     implementation(libs.bundles.di)
-    implementation(libs.bundles.database)
-    implementation(libs.mlkit.language.id)
     implementation(libs.coroutines.play.services)
     implementation(libs.androidx.material.icons.extended)
-    ksp(libs.room.compiler)
     implementation(libs.supabase.auth)
     implementation(libs.supabase.storage)
     implementation(libs.ktor.client.android)
     implementation(libs.supabase.postgrest)
     implementation(libs.kotlinx.serialization)
+    implementation(libs.navigation.compose)
 }

@@ -11,14 +11,12 @@ composeBom = "2026.05.01"
 media3 = "1.10.1"
 retrofit = "3.0.0"
 koin = "4.2.1"
-room = "2.8.4"
-ksp = "2.3.7"
-mlkit = "17.0.6"
 kotlinx-coroutines = "1.11.0"
 coil = "3.4.0"
 supabase = "3.7.0"
 ktor = "3.5.1"
 kotlinx = "1.11.0"
+navigation = "2.9.8"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -43,10 +41,6 @@ retrofit-core = { group = "com.squareup.retrofit2", name = "retrofit", version.r
 retrofit-gson = { group = "com.squareup.retrofit2", name = "converter-gson", version.ref = "retrofit" }
 koin-android = { group = "io.insert-koin", name = "koin-android", version.ref = "koin"}
 koin-compose = { group = "io.insert-koin", name = "koin-androidx-compose", version.ref = "koin" }
-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room"}
-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room"}
-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room"}
-mlkit-language-id = { group = "com.google.mlkit", name = "language-id", version.ref = "mlkit" }
 coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", name = "kotlinx-coroutines", version.ref = "kotlinx-coroutines"}
 coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref = "coil"}
 coil-network-http = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", version.ref = "coil" }
@@ -55,16 +49,15 @@ supabase-auth = { group = "io.github.jan-tennert.supabase", name = "auth-kt", ve
 supabase-storage = { group = "io.github.jan-tennert.supabase", name = "storage-kt", version.ref = "supabase" }
 supabase-postgrest = { group = "io.github.jan-tennert.supabase", name = "postgrest-kt", version.ref = "supabase" }
 ktor-client-android = { group = "io.ktor", name = "ktor-client-android", version.ref = "ktor" }
+navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-ksp = { id = "com.google.devtools.ksp", version.ref = "ksp"}
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 
 [bundles]
 media3 = ["media3-exoplayer", "media3-session", "media3-ui-compose-material3"]
 networking = ["retrofit-core", "retrofit-gson", "coil-compose", "coil-network-http"]
-database = ["room-runtime", "room-ktx"]
 di = ["koin-android", "koin-compose"]
 

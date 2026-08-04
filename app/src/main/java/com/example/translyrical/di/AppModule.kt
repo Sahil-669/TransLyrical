@@ -5,10 +5,10 @@ import com.example.translyrical.data.repository.CloudSongRepository
 import com.example.translyrical.data.repository.CloudSongRepositoryImpl
 import com.example.translyrical.data.repository.SpotifyRepository
 import com.example.translyrical.domain.LyricTranslator
+import com.example.translyrical.network.GeminiApi
 import com.example.translyrical.network.LrcLibApi
 import com.example.translyrical.network.SpotifyAuthApi
 import com.example.translyrical.network.SpotifySearchApi
-import com.example.translyrical.network.TranslationApi
 import com.example.translyrical.ui.CloudSongViewModel
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.Auth
@@ -26,8 +26,9 @@ val appModule = module {
 
     single {
         OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .header("User-Agent", "TransLyrical/1.0 (kur0)")
@@ -65,17 +66,6 @@ val appModule = module {
 
     single { SpotifyRepository(get(), get()) }
 
-    single {
-        Retrofit.Builder()
-            .baseUrl("https://translate.googleapis.com/")
-            .client(get<OkHttpClient>())
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-    }
-
-    single { get<Retrofit>().create(TranslationApi::class.java) }
-    factory { LyricTranslator(api = get()) }
-
     single<SupabaseClient> {
         createSupabaseClient(
             supabaseUrl = "https://ffldywbvaxusbiqlwruc.supabase.co",
@@ -86,6 +76,16 @@ val appModule = module {
             install(Postgrest)
         }
     }
+
+    single<GeminiApi> {
+        Retrofit.Builder()
+            .baseUrl("https://generativelanguage.googleapis.com/")
+            .client(get<OkHttpClient>())
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(GeminiApi::class.java)
+    }
+    single { LyricTranslator(get()) }
     single<CloudSongRepository> { CloudSongRepositoryImpl(get()) }
     viewModel { CloudSongViewModel(get()) }
 }
