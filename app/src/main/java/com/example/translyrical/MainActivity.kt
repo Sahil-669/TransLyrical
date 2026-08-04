@@ -33,14 +33,15 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -174,6 +175,14 @@ fun TransLyrical() {
             currentCover = spotifyMeta?.coverArtUrl
             currentTitle = spotifyMeta?.title ?: currentTitle
             currentArtist = spotifyMeta?.artist ?: currentArtist
+            val currentSpotifyId = spotifyMeta?.spotifyId
+            val alreadyExists = cloudSongViewModel.checkSongExists(spotifyId = currentSpotifyId, title = currentTitle, artist = currentArtist)
+            if (alreadyExists) {
+                cloudSongViewModel.loadSongs()
+                fetchError = "Song '$currentTitle' is already in your library!"
+                isFetching = false
+                return@LaunchedEffect
+            }
 
             if (finalLrcResponse?.syncedLyrics != null ) {
                 lyricsList = LrcParser.parse(finalLrcResponse.syncedLyrics)
@@ -181,7 +190,7 @@ fun TransLyrical() {
                 val audioBytes = context.contentResolver.openInputStream(audioUri!!)?.use { it.readBytes() }
                 if (audioBytes != null) {
                     cloudSongViewModel.uploadSong(
-                        title = currentTitle, artist = currentArtist, audioBytes = audioBytes,
+                        spotifyId = currentSpotifyId, title = currentTitle, artist = currentArtist, audioBytes = audioBytes,
                         coverUrl = currentCover, syncedLyrics = lyricsList, translatedLyrics = translatedLyrics
                     )
                 }
@@ -300,7 +309,13 @@ fun MainScreen(
         ) { page ->
             when (page) {
                 0 -> AddSongsScreen(onAudioSelected)
-                1 -> LibraryScreen(cloudViewModel, onCloudSongSelected)
+                1 -> LibraryScreen(
+                    cloudViewModel,
+                    onCloudSongSelected,
+                    onDeleteSong = { cloudSong ->
+                        cloudViewModel.deleteSong(cloudSong.id)
+                    }
+                )
             }
         }
     }
@@ -342,7 +357,8 @@ fun AddSongsScreen(onAudioSelected: (Uri) -> Unit) {
 @Composable
 fun LibraryScreen(
     viewModel: CloudSongViewModel,
-    onCloudSongSelected: (CloudSong) -> Unit
+    onCloudSongSelected: (CloudSong) -> Unit,
+    onDeleteSong: (CloudSong) -> Unit
     ) {
 
     val uiState by viewModel.uiState.collectAsState()
@@ -382,10 +398,14 @@ fun LibraryScreen(
                     contentPadding = PaddingValues(bottom = 100.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(uiState.songs) { song ->
+                    items(
+                        uiState.songs,
+                        key = { song -> song.id }
+                    ) { song ->
                         SongListItem(
                             song = song,
-                            onClick = { onCloudSongSelected(song) }
+                            onClick = { onCloudSongSelected(song) },
+                            onDeleteClick = { onDeleteSong(song) }
                         )
                     }
                 }
@@ -395,7 +415,7 @@ fun LibraryScreen(
 }
 
 @Composable
-fun SongListItem(song: CloudSong, onClick: () -> Unit) {
+fun SongListItem(song: CloudSong, onClick: () -> Unit, onDeleteClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -444,11 +464,13 @@ fun SongListItem(song: CloudSong, onClick: () -> Unit) {
             )
         }
 
-        Icon(
-            imageVector = Icons.Rounded.PlayArrow,
-            contentDescription = "Play",
-            tint = Color.White.copy(alpha = 0.8f)
-        )
+        IconButton(onClick = onDeleteClick) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Delete song",
+                tint = MaterialTheme.colorScheme.error
+            )
+        }
     }
 }
 

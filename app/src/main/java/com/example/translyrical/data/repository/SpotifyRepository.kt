@@ -37,8 +37,9 @@ class SpotifyRepository (
                 ?.firstOrNull()?.asJsonObject?.getAsJsonPrimitive("name")?.asString ?: "Unknown Artist"
             val coverUrl = trackObject.getAsJsonObject("album")?.getAsJsonArray("images")
                 ?.firstOrNull()?.asJsonObject?.getAsJsonPrimitive("url")?.asString
+            val spotifyId = trackObject.getAsJsonPrimitive("id").asString
 
-            SpotifyMetadata(title = title, artist = artist, coverArtUrl = coverUrl)
+            SpotifyMetadata(title = title, artist = artist, coverArtUrl = coverUrl, spotifyId = spotifyId)
         } catch (e: Exception) {
             e.printStackTrace()
             null
@@ -56,4 +57,4 @@ class SpotifyRepository (
     }
 }
 
-data class SpotifyMetadata(val title: String, val artist: String, val coverArtUrl: String?)
+data class SpotifyMetadata(val title: String, val artist: String, val coverArtUrl: String?, val spotifyId: String? = null)

@@ -12,6 +12,7 @@ class CloudSongRepositoryImpl(
 ) : CloudSongRepository{
 
     override suspend fun uploadCloudSong(
+        spotifyId: String?,
         title: String,
         artist: String,
         audioBytes: ByteArray,
@@ -28,6 +29,7 @@ class CloudSongRepositoryImpl(
             val publicAudioUrl = supabase.storage["songs"].publicUrl(fileName)
 
             val songDto = CloudSongDto(
+                spotifyId = spotifyId,
                 title = title,
                 artist = artist,
                 audioUrl = publicAudioUrl,
@@ -56,6 +58,59 @@ class CloudSongRepositoryImpl(
         } catch (e: Exception) {
             Log.e("SupabaseFetch", "Failed to fetch library: ${e.message}", e)
             Result.failure(e)
+        }
+    }
+
+    override suspend fun getExistingSong(
+        spotifyId: String?,
+        title: String,
+        artist: String
+    ): CloudSong? {
+        return try {
+            if (!spotifyId.isNullOrBlank()) {
+                val songBySpotify = supabase.postgrest["songs"]
+                    .select {
+                        filter { eq("spotify_id", spotifyId) }
+                    }
+                    .decodeSingleOrNull<CloudSongDto>()
+                if (songBySpotify != null) {
+                    return songBySpotify.toDomain()
+                }
+            }
+            val fallbackResults = supabase.postgrest["songs"]
+                .select {
+                    filter {
+                        eq("title", title)
+                        eq("artist", artist)
+                    }
+                }
+                .decodeList<CloudSongDto>()
+            return fallbackResults.firstOrNull()?.toDomain()
+        } catch (e: Exception) {
+            Log.e("CloudSongRepo", "Failed to check for existing song", e)
+            null
+        }
+    }
+
+    override suspend fun deleteSong(id: String) {
+        try {
+            val songToDelete = supabase.postgrest["songs"]
+                .select { filter { eq("id", id) } }
+                .decodeSingleOrNull<CloudSongDto>()
+            if (songToDelete != null) {
+                val fileName = songToDelete.audioUrl.substringAfterLast("/")
+                try {
+                    supabase.storage["songs"].delete(fileName)
+                } catch (e: Exception) {
+                    Log.e("CloudSongRepo", "Failed to delete storage file, it may be orphaned", e)
+                }
+                supabase.postgrest["songs"].delete {
+                    filter { eq("id", id) }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("CloudSongRepo", "Failed to delete song", e)
+            throw e
         }
     }
 }
