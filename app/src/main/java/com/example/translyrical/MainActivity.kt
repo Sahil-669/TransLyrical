@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
@@ -35,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -43,8 +46,11 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -103,6 +109,7 @@ fun TransLyrical() {
     val cloudSongViewModel = koinViewModel<CloudSongViewModel>()
     val uiState by cloudSongViewModel.uiState.collectAsState()
     val navController = rememberNavController()
+    val coroutineScope = rememberCoroutineScope()
 
     var audioUri by remember { mutableStateOf<Uri?>(null) }
     var lyricsList by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
@@ -112,79 +119,64 @@ fun TransLyrical() {
     var currentArtist by remember { mutableStateOf("Unknown Artist") }
     var currentCover by remember { mutableStateOf<String?>(null) }
     var fetchError by remember { mutableStateOf<String?>(null) }
+    var showOverrideDialog by remember { mutableStateOf(false) }
+    var editableTitle by remember { mutableStateOf("") }
+    var editableArtist by remember { mutableStateOf("") }
 
-    LaunchedEffect(audioUri) {
-        if (audioUri == null) return@LaunchedEffect
-        if (audioUri!!.scheme?.startsWith("http") == true) return@LaunchedEffect
-
+    suspend fun runFetchingPipeline(searchTitle: String, searchArtist: String, fallbackFileName: String) {
         isFetching = true
         fetchError = null
+        showOverrideDialog = false
+
         try {
-            val localMeta = extractMetadata(context, audioUri!!)
+            var finalLrcResponse: LrcLibResponse?
 
-            val tempTitle = localMeta?.title?: audioUri!!.lastPathSegment ?: "Unknown Track"
-            val tempArtist = localMeta?.artist ?: "Unknown Artist"
-            val existingSong = uiState.songs.find { cloudSong ->
-                cloudSong.title.equals(tempTitle, ignoreCase = true) &&
-                        cloudSong.artist.equals(tempArtist, ignoreCase = true)
-            }
-            if (existingSong != null) {
-                lyricsList = existingSong.syncedLyricsJson.toLyricsList()
-                translatedLyrics = existingSong.translatedLyricsJson.toLyricsList()
-                currentTitle = existingSong.title
-                currentArtist = existingSong.artist
-                currentCover = existingSong.coverUrl
-                isFetching = false
-                navController.navigate("player") { popUpTo("home") }
-                return@LaunchedEffect
-            }
-
-            val rawFileName = getFileNameFromUri(context, audioUri!!)
-            val cleanFileName = rawFileName.substringBeforeLast(".")
-            var finalLrcResponse : LrcLibResponse?
-            currentTitle = localMeta?.title ?: cleanFileName
-            currentArtist = localMeta?.artist ?: "Unknown Artist"
             val findBestMatch = { results: List<LrcLibResponse> ->
                 results
                     .filter { !it.syncedLyrics.isNullOrBlank() }
-                    .take(8)
+                    .take(5)
                     .minByOrNull { it.syncedLyrics!!.length }
             }
+
             try {
-                finalLrcResponse = lrcLibApi.getLyrics(currentTitle, currentArtist)
+                finalLrcResponse = lrcLibApi.getLyrics(searchTitle, searchArtist)
             } catch (e: HttpException) {
                 if (e.code() == 404) {
-                    var searchResults = lrcLibApi.searchLyrics("$currentTitle $currentArtist")
+                    var searchResults = lrcLibApi.searchLyrics("$searchTitle $searchArtist")
                     finalLrcResponse = findBestMatch(searchResults)
 
-                    if (finalLrcResponse == null && cleanFileName.isNotBlank()) {
-                        searchResults = lrcLibApi.searchLyrics(cleanFileName)
+                    if (finalLrcResponse == null && fallbackFileName.isNotBlank()) {
+                        searchResults = lrcLibApi.searchLyrics(fallbackFileName)
                         finalLrcResponse = findBestMatch(searchResults)
                     }
                 } else {
                     throw e
                 }
             }
+
             if (finalLrcResponse != null) {
-                currentTitle = finalLrcResponse.trackName.ifBlank { cleanFileName }
-                currentArtist = finalLrcResponse.artistName.ifBlank { "Unknown Artist" }
+                currentTitle = finalLrcResponse.trackName.ifBlank { searchTitle }
+                currentArtist = finalLrcResponse.artistName.ifBlank { searchArtist }
             } else {
-                currentTitle = cleanFileName
+                currentTitle = searchTitle
+                currentArtist = searchArtist
             }
+
             val spotifyMeta = spotifyRepository.fetchCoverArtAndMeta("$currentTitle $currentArtist")
             currentCover = spotifyMeta?.coverArtUrl
             currentTitle = spotifyMeta?.title ?: currentTitle
             currentArtist = spotifyMeta?.artist ?: currentArtist
             val currentSpotifyId = spotifyMeta?.spotifyId
+
             val alreadyExists = cloudSongViewModel.checkSongExists(spotifyId = currentSpotifyId, title = currentTitle, artist = currentArtist)
             if (alreadyExists) {
                 cloudSongViewModel.loadSongs()
                 fetchError = "Song '$currentTitle' is already in your library!"
                 isFetching = false
-                return@LaunchedEffect
+                return
             }
 
-            if (finalLrcResponse?.syncedLyrics != null ) {
+            if (finalLrcResponse?.syncedLyrics != null) {
                 lyricsList = LrcParser.parse(finalLrcResponse.syncedLyrics)
                 translatedLyrics = lyricTranslator.getFullSongTranslation(lyricsList)
                 val audioBytes = context.contentResolver.openInputStream(audioUri!!)?.use { it.readBytes() }
@@ -197,14 +189,47 @@ fun TransLyrical() {
                 isFetching = false
                 navController.navigate("player") { popUpTo("home") }
             } else {
-                fetchError = "No lyrics found online for $currentTitle"
+                isFetching = false
+                editableTitle = searchTitle
+                editableArtist = searchArtist
+                showOverrideDialog = true
             }
         } catch (e: Exception) {
             Log.e("TransLyricalFetch", "Pipeline critical failure", e)
             fetchError = "An error occurred while loading the song."
-        } finally {
             isFetching = false
         }
+    }
+
+    LaunchedEffect(audioUri) {
+        if (audioUri == null) return@LaunchedEffect
+        if (audioUri!!.scheme?.startsWith("http") == true) return@LaunchedEffect
+
+        val localMeta = extractMetadata(context, audioUri!!)
+        val tempTitle = localMeta?.title ?: audioUri!!.lastPathSegment ?: "Unknown Track"
+        val tempArtist = localMeta?.artist ?: "Unknown Artist"
+
+        val existingSong = uiState.songs.find { cloudSong ->
+            cloudSong.title.equals(tempTitle, ignoreCase = true) &&
+                    cloudSong.artist.equals(tempArtist, ignoreCase = true)
+        }
+        if (existingSong != null) {
+            lyricsList = existingSong.syncedLyricsJson.toLyricsList()
+            translatedLyrics = existingSong.translatedLyricsJson.toLyricsList()
+            currentTitle = existingSong.title
+            currentArtist = existingSong.artist
+            currentCover = existingSong.coverUrl
+            isFetching = false
+            navController.navigate("player") { popUpTo("home") }
+            return@LaunchedEffect
+        }
+        val rawFileName = getFileNameFromUri(context, audioUri!!)
+        val cleanFileName = rawFileName.substringBeforeLast(".")
+
+        val searchTitle = localMeta?.title ?: cleanFileName
+        val searchArtist = localMeta?.artist ?: "Unknown Artist"
+
+        runFetchingPipeline(searchTitle, searchArtist, cleanFileName)
     }
 
     RippleBackground(iconRes = R.drawable.ic_music_note) {
@@ -232,6 +257,21 @@ fun TransLyrical() {
                             navController.navigate("player") { popUpTo("home") }
                         }
                     )
+                    if (showOverrideDialog) {
+                        MetadataOverrideDialog(
+                            initialTitle = editableTitle,
+                            initialArtist = editableArtist,
+                            onDismiss = {
+                                showOverrideDialog = false
+                                audioUri = null
+                            },
+                            onRetry = { newTitle, newArtist ->
+                                coroutineScope.launch {
+                                    runFetchingPipeline(newTitle, newArtist, newTitle)
+                                }
+                            }
+                        )
+                    }
                     if (isFetching || fetchError != null) {
                         Box(
                             modifier = Modifier
@@ -525,4 +565,81 @@ fun getFileNameFromUri(context: Context, uri: Uri): String {
         }
     }
     return result ?: "Unknown"
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MetadataOverrideDialog(
+    initialTitle: String,
+    initialArtist: String,
+    onDismiss: () -> Unit,
+    onRetry: (String, String) -> Unit
+) {
+    var title by remember { mutableStateOf(initialTitle) }
+    var artist by remember { mutableStateOf(initialArtist) }
+
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .wrapContentWidth()
+                .wrapContentHeight(),
+            shape = MaterialTheme.shapes.large,
+            tonalElevation = 6.dp,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Text(
+                    text = "Lyrics Not Found",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "We couldn't find lyrics for this track. Edit the details below and try again.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Song Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = artist,
+                    onValueChange = { artist = it },
+                    label = { Text("Artist") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { onRetry(title.trim(), artist.trim()) },
+                        enabled = title.isNotBlank() && artist.isNotBlank()
+                    ) {
+                        Text("Search Again")
+                    }
+                }
+            }
+        }
+    }
 }
