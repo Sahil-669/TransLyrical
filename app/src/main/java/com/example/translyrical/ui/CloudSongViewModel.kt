@@ -50,15 +50,10 @@ class CloudSongViewModel(
         }
     }
 
-    suspend fun checkSongExists(spotifyId: String?, title: String, artist: String): Boolean {
-        return repository.getExistingSong(spotifyId, title, artist) != null
-    }
-
     fun uploadSong(
-        spotifyId: String?,
+        youtubeId: String?,
         title: String,
         artist: String,
-        audioBytes: ByteArray,
         coverUrl: String?,
         syncedLyrics: List<LyricLine>,
         translatedLyrics: List<LyricLine>?
@@ -66,7 +61,7 @@ class CloudSongViewModel(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
-            val existingSong = repository.getExistingSong(spotifyId, title, artist)
+            val existingSong = repository.getExistingSong(youtubeId, title, artist)
             if (existingSong != null) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
@@ -78,10 +73,9 @@ class CloudSongViewModel(
             val translatedJson = translatedLyrics?.let { gson.toJson(it) }
 
             repository.uploadCloudSong(
-                spotifyId,
+                youtubeId,
                 title,
                 artist,
-                audioBytes,
                 coverUrl,
                 syncedJson,
                 translatedJson

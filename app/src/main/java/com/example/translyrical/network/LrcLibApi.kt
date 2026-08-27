@@ -21,5 +21,6 @@ data class LrcLibResponse(
     val id: Int,
     val trackName: String,
     val artistName: String,
+    val duration: Double?,
     val syncedLyrics: String?
 )

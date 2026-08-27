@@ -56,6 +56,9 @@ android {
         resources {
             excludes += "/META-INF/INDEX.LIST"
         }
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 }
 
@@ -83,6 +86,7 @@ dependencies {
     implementation(libs.supabase.auth)
     implementation(libs.supabase.storage)
     implementation(libs.ktor.client.android)
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
     implementation(libs.supabase.postgrest)
     implementation(libs.kotlinx.serialization)
     implementation(libs.navigation.compose)

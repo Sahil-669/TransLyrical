@@ -67,7 +67,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.example.translyrical.data.repository.SpotifyRepository
 import com.example.translyrical.domain.CloudSong
 import com.example.translyrical.domain.LyricTranslator
 import com.example.translyrical.network.LrcLibApi
@@ -83,17 +82,31 @@ import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import androidx.core.net.toUri
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import coil3.compose.AsyncImage
+import com.example.translyrical.data.repository.SpotifyRepository
 import com.example.translyrical.network.LrcLibResponse
-import retrofit2.HttpException
+import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLRequest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                YoutubeDL.getInstance().init(application)
+                YoutubeDL.getInstance().updateYoutubeDL(application)
+            } catch (e: Exception) {
+                Log.e("YTDL_TEST", "Failed to initialize or update youtubedl-android", e)
+            }
+        }
         setContent {
             TransLyrical()
         }
@@ -112,6 +125,7 @@ fun TransLyrical() {
     val coroutineScope = rememberCoroutineScope()
 
     var audioUri by remember { mutableStateOf<Uri?>(null) }
+    var streamHeaders by remember { mutableStateOf<Map<String, String>?>(null) }
     var lyricsList by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
     var translatedLyrics by remember { mutableStateOf<List<LyricLine>?>(null) }
     var isFetching by remember { mutableStateOf(false) }
@@ -123,77 +137,96 @@ fun TransLyrical() {
     var editableTitle by remember { mutableStateOf("") }
     var editableArtist by remember { mutableStateOf("") }
 
-    suspend fun runFetchingPipeline(searchTitle: String, searchArtist: String, fallbackFileName: String) {
+    suspend fun runFetchingPipeline(
+        searchTitle: String,
+        searchArtist: String,
+        fallbackFileName: String = "",
+        isLocalFile: Boolean = false
+    ) {
         isFetching = true
         fetchError = null
         showOverrideDialog = false
 
         try {
-            var finalLrcResponse: LrcLibResponse?
+            var streamUrl: String? = null
+            var ytDuration = 0
+            var ytId: String? = null
 
-            val findBestMatch = { results: List<LrcLibResponse> ->
-                results
-                    .filter { !it.syncedLyrics.isNullOrBlank() }
-                    .take(5)
-                    .minByOrNull { it.syncedLyrics!!.length }
-            }
+            if (!isLocalFile) {
+                val streamData = extractAudio("$searchTitle $searchArtist")
 
-            try {
-                finalLrcResponse = lrcLibApi.getLyrics(searchTitle, searchArtist)
-            } catch (e: HttpException) {
-                if (e.code() == 404) {
-                    var searchResults = lrcLibApi.searchLyrics("$searchTitle $searchArtist")
-                    finalLrcResponse = findBestMatch(searchResults)
-
-                    if (finalLrcResponse == null && fallbackFileName.isNotBlank()) {
-                        searchResults = lrcLibApi.searchLyrics(fallbackFileName)
-                        finalLrcResponse = findBestMatch(searchResults)
-                    }
-                } else {
-                    throw e
+                if (streamData == null) {
+                    fetchError = "Could not find audio stream on YouTube."
+                    isFetching = false
+                    return
                 }
-            }
-
-            if (finalLrcResponse != null) {
-                currentTitle = finalLrcResponse.trackName.ifBlank { searchTitle }
-                currentArtist = finalLrcResponse.artistName.ifBlank { searchArtist }
+                streamUrl = streamData.url
+                streamHeaders = streamData.headers
+                ytDuration = streamData.durationSeconds
+                ytId = streamData.youtubeId
+                currentTitle = searchTitle
+                currentArtist = searchArtist
             } else {
                 currentTitle = searchTitle
                 currentArtist = searchArtist
             }
 
-            val spotifyMeta = spotifyRepository.fetchCoverArtAndMeta("$currentTitle $currentArtist")
-            currentCover = spotifyMeta?.coverArtUrl
-            currentTitle = spotifyMeta?.title ?: currentTitle
-            currentArtist = spotifyMeta?.artist ?: currentArtist
-            val currentSpotifyId = spotifyMeta?.spotifyId
+            var finalLrcResponse: LrcLibResponse? = null
+            try {
+                var searchResults = lrcLibApi.searchLyrics("$searchTitle $searchArtist")
+                if (searchResults.isEmpty() && fallbackFileName.isNotBlank()) {
+                    searchResults = lrcLibApi.searchLyrics(fallbackFileName)
+                }
+                val validResults = searchResults.filter { !it.syncedLyrics.isNullOrBlank() }
 
-            val alreadyExists = cloudSongViewModel.checkSongExists(spotifyId = currentSpotifyId, title = currentTitle, artist = currentArtist)
-            if (alreadyExists) {
-                cloudSongViewModel.loadSongs()
-                fetchError = "Song '$currentTitle' is already in your library!"
-                isFetching = false
-                return
+                finalLrcResponse = if (!isLocalFile && ytDuration > 0) {
+                    validResults.minByOrNull { abs((it.duration ?: 0.0) - ytDuration) }
+                } else {
+                    validResults.maxByOrNull { it.syncedLyrics!!.length }
+                }
+
+                if (finalLrcResponse == null) {
+                    finalLrcResponse = lrcLibApi.getLyrics(searchTitle, searchArtist)
+                }
+            } catch (e: Exception) {
+                Log.e("TransLyricalFetch", "LrcLib fetch failed", e)
             }
 
-            if (finalLrcResponse?.syncedLyrics != null) {
-                lyricsList = LrcParser.parse(finalLrcResponse.syncedLyrics)
-                translatedLyrics = lyricTranslator.getFullSongTranslation(lyricsList)
-                val audioBytes = context.contentResolver.openInputStream(audioUri!!)?.use { it.readBytes() }
-                if (audioBytes != null) {
-                    cloudSongViewModel.uploadSong(
-                        spotifyId = currentSpotifyId, title = currentTitle, artist = currentArtist, audioBytes = audioBytes,
-                        coverUrl = currentCover, syncedLyrics = lyricsList, translatedLyrics = translatedLyrics
-                    )
-                }
-                isFetching = false
-                navController.navigate("player") { popUpTo("home") }
-            } else {
+            if (finalLrcResponse?.syncedLyrics == null) {
                 isFetching = false
                 editableTitle = searchTitle
                 editableArtist = searchArtist
                 showOverrideDialog = true
+                return
             }
+
+            currentTitle = finalLrcResponse.trackName.ifBlank { currentTitle }
+            currentArtist = finalLrcResponse.artistName.ifBlank { currentArtist }
+
+            val spotifyMeta = spotifyRepository.fetchCoverArtAndMeta("$currentTitle $currentArtist")
+            currentCover = spotifyMeta?.coverArtUrl ?: currentCover
+
+            lyricsList = LrcParser.parse(finalLrcResponse.syncedLyrics)
+            translatedLyrics = lyricTranslator.getFullSongTranslation(lyricsList)
+
+            if (!isLocalFile) {
+                audioUri = streamUrl?.toUri()
+            } else {
+                streamHeaders = null
+            }
+
+            cloudSongViewModel.uploadSong(
+                ytId,
+                currentTitle,
+                currentArtist,
+                currentCover,
+                lyricsList,
+                translatedLyrics
+            )
+
+            isFetching = false
+            navController.navigate("player") { popUpTo("home") }
+
         } catch (e: Exception) {
             Log.e("TransLyricalFetch", "Pipeline critical failure", e)
             fetchError = "An error occurred while loading the song."
@@ -203,6 +236,7 @@ fun TransLyrical() {
 
     LaunchedEffect(audioUri) {
         if (audioUri == null) return@LaunchedEffect
+
         if (audioUri!!.scheme?.startsWith("http") == true) return@LaunchedEffect
 
         val localMeta = extractMetadata(context, audioUri!!)
@@ -223,13 +257,14 @@ fun TransLyrical() {
             navController.navigate("player") { popUpTo("home") }
             return@LaunchedEffect
         }
+
         val rawFileName = getFileNameFromUri(context, audioUri!!)
         val cleanFileName = rawFileName.substringBeforeLast(".")
 
         val searchTitle = localMeta?.title ?: cleanFileName
         val searchArtist = localMeta?.artist ?: "Unknown Artist"
 
-        runFetchingPipeline(searchTitle, searchArtist, cleanFileName)
+        runFetchingPipeline(searchTitle, searchArtist, cleanFileName, isLocalFile = true)
     }
 
     RippleBackground(iconRes = R.drawable.ic_music_note) {
@@ -238,6 +273,11 @@ fun TransLyrical() {
                 Box(modifier = Modifier.fillMaxSize()) {
                     MainScreen(
                         cloudViewModel = cloudSongViewModel,
+                        onSearchRequested = { title, artist ->
+                            coroutineScope.launch {
+                                runFetchingPipeline(title, artist, fallbackFileName = title, isLocalFile = false)
+                            }
+                        },
                         onAudioSelected = { selectedUri ->
                             audioUri = null
                             audioUri = selectedUri
@@ -247,16 +287,35 @@ fun TransLyrical() {
                             fetchError = null
                         },
                         onCloudSongSelected = { cloudSong ->
-                            audioUri = cloudSong.audioUrl.toUri()
-                            lyricsList = cloudSong.syncedLyricsJson.toLyricsList()
-                            translatedLyrics = cloudSong.translatedLyricsJson.toLyricsList()
-                            currentTitle = cloudSong.title
-                            currentArtist = cloudSong.artist
-                            currentCover = cloudSong.coverUrl
-                            isFetching = false
-                            navController.navigate("player") { popUpTo("home") }
+                            coroutineScope.launch {
+                                isFetching = true
+
+                                val streamData = if (!cloudSong.youtubeId.isNullOrBlank()) {
+                                    extractAudio(cloudSong.youtubeId, isDirectId = true)
+                                } else {
+                                    extractAudio("${cloudSong.title} ${cloudSong.artist}", isDirectId = false)
+                                }
+
+                                if (streamData != null) {
+                                    audioUri = streamData.url.toUri()
+                                    streamHeaders = streamData.headers
+
+                                    lyricsList = cloudSong.syncedLyricsJson.toLyricsList()
+                                    translatedLyrics = cloudSong.translatedLyricsJson.toLyricsList()
+                                    currentTitle = cloudSong.title
+                                    currentArtist = cloudSong.artist
+                                    currentCover = cloudSong.coverUrl
+
+                                    isFetching = false
+                                    navController.navigate("player") { popUpTo("home") }
+                                } else {
+                                    fetchError = "Could not connect to YouTube stream."
+                                    isFetching = false
+                                }
+                            }
                         }
                     )
+
                     if (showOverrideDialog) {
                         MetadataOverrideDialog(
                             initialTitle = editableTitle,
@@ -267,7 +326,7 @@ fun TransLyrical() {
                             },
                             onRetry = { newTitle, newArtist ->
                                 coroutineScope.launch {
-                                    runFetchingPipeline(newTitle, newArtist, newTitle)
+                                    runFetchingPipeline(newTitle, newArtist, newTitle, isLocalFile = (audioUri?.scheme != "http" && audioUri?.scheme != "https"))
                                 }
                             }
                         )
@@ -307,8 +366,16 @@ fun TransLyrical() {
                 }
             }
             composable("player") {
-                val playerState = rememberLyricPlayer(lyricsList, audioUri)
-                LyricScreen(playerState, translatedLyrics, currentTitle, currentArtist, currentCover)
+                val playerState = rememberLyricPlayer(lyricsList, audioUri, streamHeaders)
+                LyricScreen(
+                    playerState,
+                    translatedLyrics,
+                    currentTitle,
+                    currentArtist,
+                    currentCover,
+                    audioUri,
+                    streamHeaders
+                )
             }
         }
     }
@@ -318,6 +385,7 @@ fun TransLyrical() {
 @Composable
 fun MainScreen(
     cloudViewModel: CloudSongViewModel,
+    onSearchRequested: (String, String) -> Unit,
     onAudioSelected: (Uri) -> Unit,
     onCloudSongSelected: (CloudSong) -> Unit
 ) {
@@ -348,7 +416,7 @@ fun MainScreen(
                 .padding(paddingValues)
         ) { page ->
             when (page) {
-                0 -> AddSongsScreen(onAudioSelected)
+                0 -> AddSongsScreen(onSearchRequested,onAudioSelected)
                 1 -> LibraryScreen(
                     cloudViewModel,
                     onCloudSongSelected,
@@ -362,7 +430,10 @@ fun MainScreen(
 }
 
 @Composable
-fun AddSongsScreen(onAudioSelected: (Uri) -> Unit) {
+fun AddSongsScreen(
+    onSearchRequested: (String, String) -> Unit,
+    onAudioSelected: (Uri) -> Unit
+) {
     val audioPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -371,24 +442,54 @@ fun AddSongsScreen(onAudioSelected: (Uri) -> Unit) {
         }
     }
 
+    var showSearchDialog by remember { mutableStateOf(false) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(bottom = 80.dp),
         contentAlignment = Alignment.BottomCenter
     ) {
-        Button(
-            onClick = { audioPickerLauncher.launch("audio/*") },
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary.copy(.25f),
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ),
-            modifier = Modifier
-                .fillMaxWidth(0.6f)
-                .height(56.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(.8f),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Select MP3", style = MaterialTheme.typography.titleMedium)
+            Button(
+                onClick = { audioPickerLauncher.launch("audio/*") },
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary.copy(.25f),
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
+            ) {
+                Text("Select MP3", style = MaterialTheme.typography.titleMedium)
+            }
+
+            Button(
+                onClick = { showSearchDialog = true },
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary.copy(.25f),
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
+            ) {
+                Text("Stream", style = MaterialTheme.typography.titleMedium)
+            }
+        }
+        if (showSearchDialog) {
+            StreamSearchDialog(
+                onDismiss = { showSearchDialog = false },
+                onSearch = { title, artist ->
+                    showSearchDialog = false
+                    onSearchRequested(title, artist)
+                }
+            )
         }
     }
 }
@@ -637,6 +738,113 @@ fun MetadataOverrideDialog(
                         enabled = title.isNotBlank() && artist.isNotBlank()
                     ) {
                         Text("Search Again")
+                    }
+                }
+            }
+        }
+    }
+}
+
+data class StreamData(
+    val url: String,
+    val headers: Map<String, String>,
+    val coverUrl: String?,
+    val durationSeconds: Int,
+    val youtubeId: String?
+)
+
+suspend fun extractAudio(searchQuery: String, isDirectId: Boolean = false): StreamData? {
+    return withContext(Dispatchers.IO) {
+        try {
+            val requestString = if (isDirectId) {
+                "ytsearch1:$searchQuery"
+            } else {
+                "ytsearch1:$searchQuery official audio"
+            }
+
+            val request = YoutubeDLRequest(requestString)
+
+            request.addOption("-f", "bestaudio[ext=m4a]/bestaudio")
+            request.addOption("--force-ipv4")
+            request.addOption("--no-cache-dir")
+
+            val info = YoutubeDL.getInstance().getInfo(request)
+            if (info.url != null) {
+                StreamData(
+                    info.url!!,
+                    info.httpHeaders ?: emptyMap(),
+                    info.thumbnail,
+                    info.duration,
+                    info.id
+                )
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e("YTDL", "Extraction failed", e)
+            null
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun StreamSearchDialog(
+    onDismiss: () -> Unit,
+    onSearch: (String, String) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var artist by remember { mutableStateOf("") }
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .wrapContentWidth()
+                .wrapContentHeight(),
+            shape = MaterialTheme.shapes.large,
+            tonalElevation = 6.dp,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text(
+                    text = "Stream a Song",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Song Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = artist,
+                    onValueChange = { artist = it },
+                    label = { Text("Artist") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { onSearch(title.trim(), artist.trim()) },
+                        enabled = title.isNotBlank() && artist.isNotBlank()
+                    ) {
+                        Text("Search")
                     }
                 }
             }

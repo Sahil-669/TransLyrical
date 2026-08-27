@@ -1,6 +1,7 @@
 package com.example.translyrical.player
 
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -12,21 +13,48 @@ import androidx.compose.runtime.retain.retain
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.example.translyrical.parser.LyricLine
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlin.time.Duration.Companion.milliseconds
 
+@OptIn(UnstableApi::class)
 @Composable
 fun rememberLyricPlayer(
     lyricsList: List<LyricLine>,
-    audioUri: Uri?
+    audioUri: Uri?,
+    headers: Map<String, String>? = null
 ): LyricPlayerState {
     val context = LocalContext.current
 
     val exoPlayer = retain {
-        ExoPlayer.Builder(context).build()
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+
+        headers?.let { headerMap ->
+            headerMap["User-Agent"]?.let { ua ->
+                httpDataSourceFactory.setUserAgent(ua)
+            }
+            val otherHeaders = headerMap.filterKeys { it != "User-Agent" }
+            httpDataSourceFactory.setDefaultRequestProperties(otherHeaders)
+        }
+
+        val defaultDataSourceFactory = DefaultDataSource.Factory(
+            context,
+            httpDataSourceFactory
+        )
+
+        val mediaSourceFactory = DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(defaultDataSourceFactory)
+
+        ExoPlayer.Builder(context)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .build()
     }
 
     val playerState = remember(exoPlayer) {

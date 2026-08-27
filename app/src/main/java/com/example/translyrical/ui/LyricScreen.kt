@@ -1,5 +1,6 @@
 package com.example.translyrical.ui
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -24,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -43,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -51,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.example.translyrical.parser.LyricLine
 import com.example.translyrical.player.LyricPlayerState
+import com.example.translyrical.utils.downloadSongToDevice
 import java.util.Locale
 import kotlin.math.max
 
@@ -60,8 +64,11 @@ fun LyricScreen(
     translatedLyrics: List<LyricLine>?,
     songTitle: String,
     artistName: String,
-    coverArt: String?
-    ) {
+    coverArt: String?,
+    audioUri: Uri?,
+    streamHeaders: Map<String, String>?
+) {
+    val context = LocalContext.current
     var isDragging by remember { mutableStateOf(false) }
     var sliderPosition by remember { mutableFloatStateOf(0f) }
 
@@ -103,25 +110,50 @@ fun LyricScreen(
                 .padding(horizontal = 24.dp, vertical = 16.dp)
         ) {
 
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp)
             ) {
-                Text(
-                    text = songTitle,
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
+                Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = songTitle,
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
 
-                Text(
-                    text = artistName,
-                    color = Color.LightGray,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center
-                )
+                    Text(
+                        text = artistName,
+                        color = Color.LightGray,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        downloadSongToDevice(
+                            context,
+                            audioUri,
+                            songTitle,
+                            artistName,
+                            streamHeaders
+                        )
+                    },
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = "Download Song",
+                        tint = Color.White
+                    )
+                }
             }
 
             LazyColumn(

@@ -4,35 +4,24 @@ import android.util.Log
 import com.example.translyrical.domain.CloudSong
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.postgrest
-import io.github.jan.supabase.storage.storage
-import java.util.UUID
 
 class CloudSongRepositoryImpl(
     private val supabase: SupabaseClient
 ) : CloudSongRepository{
 
     override suspend fun uploadCloudSong(
-        spotifyId: String?,
+        youtubeId: String?,
         title: String,
         artist: String,
-        audioBytes: ByteArray,
         coverUrl: String?,
         syncedLyricsJson: String?,
         translatedLyricsJson: String?
     ): Result<Unit> {
         return try {
-            val fileName = "${UUID.randomUUID()}.mp3"
-            supabase.storage["songs"].upload(fileName, audioBytes) {
-                upsert = false
-            }
-
-            val publicAudioUrl = supabase.storage["songs"].publicUrl(fileName)
-
             val songDto = CloudSongDto(
-                spotifyId = spotifyId,
+                youtubeId = youtubeId,
                 title = title,
                 artist = artist,
-                audioUrl = publicAudioUrl,
                 coverUrl = coverUrl,
                 syncedLyricsJson = syncedLyricsJson,
                 translatedLyricsJson = translatedLyricsJson,
@@ -62,15 +51,15 @@ class CloudSongRepositoryImpl(
     }
 
     override suspend fun getExistingSong(
-        spotifyId: String?,
+        youtubeId: String?,
         title: String,
         artist: String
     ): CloudSong? {
         return try {
-            if (!spotifyId.isNullOrBlank()) {
+            if (!youtubeId.isNullOrBlank()) {
                 val songBySpotify = supabase.postgrest["songs"]
                     .select {
-                        filter { eq("spotify_id", spotifyId) }
+                        filter { eq("youtube_id", youtubeId) }
                     }
                     .decodeSingleOrNull<CloudSongDto>()
                 if (songBySpotify != null) {
@@ -94,19 +83,8 @@ class CloudSongRepositoryImpl(
 
     override suspend fun deleteSong(id: String) {
         try {
-            val songToDelete = supabase.postgrest["songs"]
-                .select { filter { eq("id", id) } }
-                .decodeSingleOrNull<CloudSongDto>()
-            if (songToDelete != null) {
-                val fileName = songToDelete.audioUrl.substringAfterLast("/")
-                try {
-                    supabase.storage["songs"].delete(fileName)
-                } catch (e: Exception) {
-                    Log.e("CloudSongRepo", "Failed to delete storage file, it may be orphaned", e)
-                }
-                supabase.postgrest["songs"].delete {
-                    filter { eq("id", id) }
-                }
+            supabase.postgrest["songs"].delete {
+                filter { eq("id", id) }
             }
         } catch (e: Exception) {
             Log.e("CloudSongRepo", "Failed to delete song", e)

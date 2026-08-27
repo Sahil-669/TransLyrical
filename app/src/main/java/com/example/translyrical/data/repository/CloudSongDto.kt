@@ -8,14 +8,12 @@ import kotlinx.serialization.Serializable
 data class CloudSongDto(
     @SerialName("id")
     val id: String? = null,
-    @SerialName("spotify_id")
-    val spotifyId: String? = null,
+    @SerialName("youtube_id")
+    val youtubeId: String? = null,
     @SerialName("title")
     val title: String = "",
     @SerialName("artist")
     val artist: String = "",
-    @SerialName("audio_url")
-    val audioUrl: String = "",
     @SerialName("cover_url")
     val coverUrl: String? = null,
     @SerialName("synced_lyrics_json")
@@ -28,10 +26,9 @@ val timestamp: Long = 0L
     fun toDomain(): CloudSong {
         return CloudSong(
             id = id?: "",
-            spotifyId = spotifyId,
+            youtubeId= youtubeId,
             title = title,
             artist = artist,
-            audioUrl = audioUrl,
             coverUrl = coverUrl,
             syncedLyricsJson = syncedLyricsJson,
             translatedLyricsJson = translatedLyricsJson,
