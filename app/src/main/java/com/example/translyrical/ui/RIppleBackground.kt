@@ -76,7 +76,7 @@ const val RIPPLE_SHADER_SRC = """
 @Composable
 fun RippleBackground(
     modifier: Modifier = Modifier,
-    @DrawableRes iconRes: Int,
+    @DrawableRes iconRes: Int = 0,
     content: @Composable () -> Unit
 ) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -95,17 +95,27 @@ fun RippleBackground(
         )
         val runtimeShader = remember { RuntimeShader(RIPPLE_SHADER_SRC) }
         val shaderBrush = remember { ShaderBrush(runtimeShader) }
-        remember(iconRes, windowInfo) {
-            val drawable = ContextCompat.getDrawable(context, iconRes)!!
-            val screenWidthPx = windowInfo.containerSize.width
-            val windowWidthDp = with(density) { screenWidthPx.toDp() }
-            val scaledDpSize = (windowWidthDp * 0.18f).coerceAtLeast(64.dp)
 
-            val targetSizePx = with(density) { scaledDpSize.toPx() }.toInt()
-            val bitmap = createBitmap(targetSizePx, targetSizePx, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(bitmap)
-            drawable.setBounds(0,0,targetSizePx,targetSizePx)
-            drawable.draw(canvas)
+        remember(iconRes, windowInfo) {
+            val targetSizePx: Int
+            val bitmap: Bitmap
+
+            if (iconRes != 0) {
+                val drawable = ContextCompat.getDrawable(context, iconRes)!!
+                val screenWidthPx = windowInfo.containerSize.width
+                val windowWidthDp = with(density) { screenWidthPx.toDp() }
+                val scaledDpSize = (windowWidthDp * 0.18f).coerceAtLeast(64.dp)
+
+                targetSizePx = with(density) { scaledDpSize.toPx() }.toInt()
+                bitmap = createBitmap(targetSizePx, targetSizePx, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(bitmap)
+                drawable.setBounds(0, 0, targetSizePx, targetSizePx)
+                drawable.draw(canvas)
+            } else {
+                targetSizePx = 1
+                bitmap = createBitmap(targetSizePx, targetSizePx, Bitmap.Config.ARGB_8888)
+            }
+
             val iconShader = BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
             runtimeShader.setInputShader("uIcon", iconShader)
             runtimeShader.setFloatUniform("uIconNativeSize", targetSizePx.toFloat(), targetSizePx.toFloat())

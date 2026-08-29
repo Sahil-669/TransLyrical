@@ -29,23 +29,32 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -56,6 +65,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -65,8 +75,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.translyrical.domain.CloudSong
 import com.example.translyrical.domain.LyricTranslator
 import com.example.translyrical.network.LrcLibApi
@@ -88,6 +101,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import coil3.compose.AsyncImage
 import com.example.translyrical.data.repository.SpotifyRepository
+import com.example.translyrical.network.ITunesApi
+import com.example.translyrical.network.ITunesTrack
 import com.example.translyrical.network.LrcLibResponse
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -267,116 +282,124 @@ fun TransLyrical() {
         runFetchingPipeline(searchTitle, searchArtist, cleanFileName, isLocalFile = true)
     }
 
-    RippleBackground(iconRes = R.drawable.ic_music_note) {
-        NavHost(navController = navController, startDestination = "home") {
-            composable("home") {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    MainScreen(
-                        cloudViewModel = cloudSongViewModel,
-                        onSearchRequested = { title, artist ->
-                            coroutineScope.launch {
-                                runFetchingPipeline(title, artist, fallbackFileName = title, isLocalFile = false)
+    NavHost(navController = navController, startDestination = "home") {
+        composable("home") {
+            Box(modifier = Modifier.fillMaxSize()) {
+                MainScreen(
+                    cloudViewModel = cloudSongViewModel,
+                    onSearchRequested = { title, artist ->
+                        coroutineScope.launch {
+                            runFetchingPipeline(
+                                title,
+                                artist,
+                                fallbackFileName = title,
+                                isLocalFile = false
+                            )
+                        }
+                    },
+                    onAudioSelected = { selectedUri ->
+                        audioUri = null
+                        audioUri = selectedUri
+                        lyricsList = emptyList()
+                        translatedLyrics = null
+                        currentCover = null
+                        fetchError = null
+                    },
+                    onCloudSongSelected = { cloudSong ->
+                        coroutineScope.launch {
+                            isFetching = true
+
+                            val streamData = if (!cloudSong.youtubeId.isNullOrBlank()) {
+                                extractAudio(cloudSong.youtubeId, isDirectId = true)
+                            } else {
+                                extractAudio("${cloudSong.title} ${cloudSong.artist}", isDirectId = false)
                             }
-                        },
-                        onAudioSelected = { selectedUri ->
+
+                            if (streamData != null) {
+                                audioUri = streamData.url.toUri()
+                                streamHeaders = streamData.headers
+
+                                lyricsList = cloudSong.syncedLyricsJson.toLyricsList()
+                                translatedLyrics = cloudSong.translatedLyricsJson.toLyricsList()
+                                currentTitle = cloudSong.title
+                                currentArtist = cloudSong.artist
+                                currentCover = cloudSong.coverUrl
+
+                                isFetching = false
+                                navController.navigate("player") { popUpTo("home") }
+                            } else {
+                                fetchError = "Could not connect to YouTube stream."
+                                isFetching = false
+                            }
+                        }
+                    },
+                    onArtistTrackSelected = { title, artist ->
+                        coroutineScope.launch {
+                            runFetchingPipeline(title, artist, fallbackFileName = title, isLocalFile = false)
+                        }
+                    }
+                )
+
+                if (showOverrideDialog) {
+                    MetadataOverrideDialog(
+                        initialTitle = editableTitle,
+                        initialArtist = editableArtist,
+                        onDismiss = {
+                            showOverrideDialog = false
                             audioUri = null
-                            audioUri = selectedUri
-                            lyricsList = emptyList()
-                            translatedLyrics = null
-                            currentCover = null
-                            fetchError = null
                         },
-                        onCloudSongSelected = { cloudSong ->
+                        onRetry = { newTitle, newArtist ->
                             coroutineScope.launch {
-                                isFetching = true
-
-                                val streamData = if (!cloudSong.youtubeId.isNullOrBlank()) {
-                                    extractAudio(cloudSong.youtubeId, isDirectId = true)
-                                } else {
-                                    extractAudio("${cloudSong.title} ${cloudSong.artist}", isDirectId = false)
-                                }
-
-                                if (streamData != null) {
-                                    audioUri = streamData.url.toUri()
-                                    streamHeaders = streamData.headers
-
-                                    lyricsList = cloudSong.syncedLyricsJson.toLyricsList()
-                                    translatedLyrics = cloudSong.translatedLyricsJson.toLyricsList()
-                                    currentTitle = cloudSong.title
-                                    currentArtist = cloudSong.artist
-                                    currentCover = cloudSong.coverUrl
-
-                                    isFetching = false
-                                    navController.navigate("player") { popUpTo("home") }
-                                } else {
-                                    fetchError = "Could not connect to YouTube stream."
-                                    isFetching = false
-                                }
+                                runFetchingPipeline(newTitle, newArtist, newTitle, isLocalFile = (audioUri?.scheme != "http" && audioUri?.scheme != "https"))
                             }
                         }
                     )
-
-                    if (showOverrideDialog) {
-                        MetadataOverrideDialog(
-                            initialTitle = editableTitle,
-                            initialArtist = editableArtist,
-                            onDismiss = {
-                                showOverrideDialog = false
-                                audioUri = null
-                            },
-                            onRetry = { newTitle, newArtist ->
-                                coroutineScope.launch {
-                                    runFetchingPipeline(newTitle, newArtist, newTitle, isLocalFile = (audioUri?.scheme != "http" && audioUri?.scheme != "https"))
-                                }
-                            }
-                        )
-                    }
-                    if (isFetching || fetchError != null) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black.copy(alpha = .8f)),
-                            contentAlignment = Alignment.Center
+                }
+                if (isFetching || fetchError != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = .8f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                if (isFetching) {
-                                    CircularProgressIndicator(color = Color.White)
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text("Fetching Synced Lyrics...", color = Color.White)
-                                } else if (fetchError != null) {
-                                    Text(
-                                        text = fetchError!!,
-                                        color = Color.White.copy(0.7f),
-                                        modifier = Modifier.padding(bottom = 16.dp)
-                                    )
-                                    Button(
-                                        onClick = {
-                                            fetchError = null
-                                            audioUri = null
-                                        }
-                                    ) {
-                                        Text("Dismiss")
+                            if (isFetching) {
+                                CircularProgressIndicator(color = Color.White)
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("Fetching Synced Lyrics...", color = Color.White)
+                            } else if (fetchError != null) {
+                                Text(
+                                    text = fetchError!!,
+                                    color = Color.White.copy(0.7f),
+                                    modifier = Modifier.padding(bottom = 16.dp)
+                                )
+                                Button(
+                                    onClick = {
+                                        fetchError = null
+                                        audioUri = null
                                     }
+                                ) {
+                                    Text("Dismiss")
                                 }
                             }
                         }
                     }
                 }
             }
-            composable("player") {
-                val playerState = rememberLyricPlayer(lyricsList, audioUri, streamHeaders)
-                LyricScreen(
-                    playerState,
-                    translatedLyrics,
-                    currentTitle,
-                    currentArtist,
-                    currentCover,
-                    audioUri,
-                    streamHeaders
-                )
-            }
+        }
+        composable("player") {
+            val playerState = rememberLyricPlayer(lyricsList, audioUri, streamHeaders)
+            LyricScreen(
+                playerState,
+                translatedLyrics,
+                currentTitle,
+                currentArtist,
+                currentCover,
+                audioUri,
+                streamHeaders
+            )
         }
     }
 }
@@ -387,53 +410,11 @@ fun MainScreen(
     cloudViewModel: CloudSongViewModel,
     onSearchRequested: (String, String) -> Unit,
     onAudioSelected: (Uri) -> Unit,
-    onCloudSongSelected: (CloudSong) -> Unit
+    onCloudSongSelected: (CloudSong) -> Unit,
+    onArtistTrackSelected: (String, String) -> Unit
 ) {
-    val pagerState = rememberPagerState(pageCount = { 2 })
-    val coroutineScope = rememberCoroutineScope()
+    var currentTab by remember { mutableIntStateOf(0) }
 
-    Scaffold(
-        containerColor = Color.Transparent,
-        floatingActionButton = {
-            if (pagerState.currentPage == 1) {
-                FloatingActionButton(
-                    onClick = {
-                        coroutineScope.launch {
-                            pagerState.animateScrollToPage(0)
-                        }
-                    },
-                    containerColor = MaterialTheme.colorScheme.primary
-                ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = "Add Song")
-                }
-            }
-        }
-    ) { paddingValues ->
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) { page ->
-            when (page) {
-                0 -> AddSongsScreen(onSearchRequested,onAudioSelected)
-                1 -> LibraryScreen(
-                    cloudViewModel,
-                    onCloudSongSelected,
-                    onDeleteSong = { cloudSong ->
-                        cloudViewModel.deleteSong(cloudSong.id)
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun AddSongsScreen(
-    onSearchRequested: (String, String) -> Unit,
-    onAudioSelected: (Uri) -> Unit
-) {
     val audioPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -442,44 +423,111 @@ fun AddSongsScreen(
         }
     }
 
+    Scaffold(
+        containerColor = Color.Black,
+        floatingActionButton = {
+            if (currentTab == 1) {
+                FloatingActionButton(
+                    onClick = { audioPickerLauncher.launch("audio/*") },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    shape = CircleShape
+                ) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = "Add MP3")
+                }
+            }
+        },
+        bottomBar = {
+            NavigationBar(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .clip(RoundedCornerShape(24.dp)),
+                containerColor = Color(0xFF1E1E1E).copy(alpha = 0.9f),
+                tonalElevation = 0.dp
+            ) {
+                NavigationBarItem(
+                    icon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                    label = { Text("Stream") },
+                    selected = currentTab == 0,
+                    onClick = { currentTab = 0 },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Color.White,
+                        selectedTextColor = Color.White,
+                        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        unselectedIconColor = Color.Gray,
+                        unselectedTextColor = Color.Gray
+                    )
+                )
+
+                NavigationBarItem(
+                    icon = { Icon(Icons.Default.LibraryMusic, contentDescription = "Library") },
+                    label = { Text("Library") },
+                    selected = currentTab == 1,
+                    onClick = { currentTab = 1 },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Color.White,
+                        selectedTextColor = Color.White,
+                        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        unselectedIconColor = Color.Gray,
+                        unselectedTextColor = Color.Gray
+                    )
+                )
+
+                NavigationBarItem(
+                    icon = { Icon(Icons.Default.Person, contentDescription = "Artists") },
+                    label = { Text("Artists") },
+                    selected = currentTab == 2,
+                    onClick = { currentTab = 2 },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = Color.White,
+                        selectedTextColor = Color.White,
+                        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                        unselectedIconColor = Color.Gray,
+                        unselectedTextColor = Color.Gray
+                    )
+                )
+            }
+        }
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier.fillMaxSize().padding(paddingValues)
+        ) {
+            when (currentTab) {
+                0 -> HomeScreen(onSearchRequested)
+                1 -> LibraryScreen(
+                    cloudViewModel,
+                    onCloudSongSelected,
+                    onDeleteSong = { cloudSong ->
+                        cloudViewModel.deleteSong(cloudSong.id)
+                    }
+                )
+                2 -> ArtistScreen(onArtistTrackSelected)
+            }
+        }
+    }
+}
+
+@Composable
+fun HomeScreen(onSearchRequested: (String, String) -> Unit) {
     var showSearchDialog by remember { mutableStateOf(false) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(bottom = 80.dp),
-        contentAlignment = Alignment.BottomCenter
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(.8f),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+    RippleBackground(iconRes = 0) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
-            Button(
-                onClick = { audioPickerLauncher.launch("audio/*") },
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary.copy(.25f),
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(56.dp)
-            ) {
-                Text("Select MP3", style = MaterialTheme.typography.titleMedium)
-            }
-
-            Button(
+            IconButton(
                 onClick = { showSearchDialog = true },
-                shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary.copy(.25f),
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ),
                 modifier = Modifier
-                    .weight(1f)
-                    .height(56.dp)
+                    .size(96.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.15f))
             ) {
-                Text("Stream", style = MaterialTheme.typography.titleMedium)
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search & Stream",
+                    tint = Color.White,
+                    modifier = Modifier.size(48.dp)
+                )
             }
         }
         if (showSearchDialog) {
@@ -845,6 +893,120 @@ fun StreamSearchDialog(
                         enabled = title.isNotBlank() && artist.isNotBlank()
                     ) {
                         Text("Search")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ArtistScreen(
+    onTrackSelected: (String, String) -> Unit,
+    iTunesApi: ITunesApi = koinInject()
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var tracks by remember { mutableStateOf<List<ITunesTrack>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    val placeholderArtists = listOf(
+        "Arijit Singh", "The Weeknd", "Karan Aujla",
+        "Mazzy Star", "Kanye West", "Radiohead"
+    )
+
+    fun searchArtist(query: String) {
+        if (query.isBlank()) return
+        coroutineScope.launch {
+            isLoading = true
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    iTunesApi.getArtistTracks(query)
+                }
+                tracks = response.results.distinctBy { it.trackName }
+            } catch (e: Exception) {
+                Log.e("ITunes", "Failed to fetch tracks", e)
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = 16.dp, start = 20.dp, end = 20.dp)
+    ) {
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search any artist...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { searchArtist(searchQuery) }),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            shape = RoundedCornerShape(16.dp)
+        )
+        if (isLoading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Color.White)
+            }
+        } else if (tracks.isEmpty()) {
+            Text(
+                text = "Trending",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color.White,
+                modifier = Modifier.padding(bottom = 12.dp, top = 8.dp)
+            )
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(placeholderArtists) { artist ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp)
+                            .clickable {
+                                searchQuery = artist
+                                searchArtist(artist)
+                            },
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.White.copy(alpha = 0.1f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(artist, color = Color.White, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 100.dp)
+            ) {
+                items(tracks) { track ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White.copy(alpha = 0.05f))
+                            .clickable { onTrackSelected(track.trackName, track.artistName) }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AsyncImage(
+                            model = track.artworkUrl100,
+                            contentDescription = "Cover",
+                            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp))
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text(track.trackName, color = Color.White, fontWeight = FontWeight.Bold)
+                            Text(track.artistName, color = Color.LightGray, fontSize = 14.sp)
+                        }
                     }
                 }
             }

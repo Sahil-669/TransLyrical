@@ -6,6 +6,7 @@ import com.example.translyrical.data.repository.CloudSongRepositoryImpl
 import com.example.translyrical.data.repository.SpotifyRepository
 import com.example.translyrical.domain.LyricTranslator
 import com.example.translyrical.network.GeminiApi
+import com.example.translyrical.network.ITunesApi
 import com.example.translyrical.network.LrcLibApi
 import com.example.translyrical.network.SpotifyAuthApi
 import com.example.translyrical.network.SpotifySearchApi
@@ -85,6 +86,16 @@ val appModule = module {
             .build()
             .create(GeminiApi::class.java)
     }
+
+    single<ITunesApi> {
+        Retrofit.Builder()
+            .baseUrl("https://itunes.apple.com/")
+            .client(get<OkHttpClient>())
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(ITunesApi::class.java)
+    }
+
     single { LyricTranslator(get()) }
     single<CloudSongRepository> { CloudSongRepositoryImpl(get()) }
     viewModel { CloudSongViewModel(get()) }
