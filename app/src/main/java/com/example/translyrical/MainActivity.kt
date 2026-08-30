@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -41,7 +42,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.BasicAlertDialog
@@ -78,6 +81,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.translyrical.domain.CloudSong
@@ -147,10 +151,13 @@ fun TransLyrical() {
     var currentTitle by remember { mutableStateOf("Unknown Track") }
     var currentArtist by remember { mutableStateOf("Unknown Artist") }
     var currentCover by remember { mutableStateOf<String?>(null) }
+    var currentYtId by remember { mutableStateOf<String?>(null) }
     var fetchError by remember { mutableStateOf<String?>(null) }
     var showOverrideDialog by remember { mutableStateOf(false) }
     var editableTitle by remember { mutableStateOf("") }
     var editableArtist by remember { mutableStateOf("") }
+
+    val playerState = rememberLyricPlayer(lyricsList, audioUri, streamHeaders)
 
     suspend fun runFetchingPipeline(
         searchTitle: String,
@@ -179,6 +186,7 @@ fun TransLyrical() {
                 streamHeaders = streamData.headers
                 ytDuration = streamData.durationSeconds
                 ytId = streamData.youtubeId
+                currentYtId = ytId
                 currentTitle = searchTitle
                 currentArtist = searchArtist
             } else {
@@ -229,15 +237,6 @@ fun TransLyrical() {
             } else {
                 streamHeaders = null
             }
-
-            cloudSongViewModel.uploadSong(
-                ytId,
-                currentTitle,
-                currentArtist,
-                currentCover,
-                lyricsList,
-                translatedLyrics
-            )
 
             isFetching = false
             navController.navigate("player") { popUpTo("home") }
@@ -306,38 +305,64 @@ fun TransLyrical() {
                         fetchError = null
                     },
                     onCloudSongSelected = { cloudSong ->
-                        coroutineScope.launch {
-                            isFetching = true
+                        val isAlreadyPlaying = (cloudSong.youtubeId != null && cloudSong.youtubeId == currentYtId) ||
+                                (cloudSong.title == currentTitle && cloudSong.artist == currentArtist)
+                        if (isAlreadyPlaying && audioUri != null) {
+                            navController.navigate("player") { popUpTo("home") }
+                        } else {
+                            coroutineScope.launch {
+                                isFetching = true
 
-                            val streamData = if (!cloudSong.youtubeId.isNullOrBlank()) {
-                                extractAudio(cloudSong.youtubeId, isDirectId = true)
-                            } else {
-                                extractAudio("${cloudSong.title} ${cloudSong.artist}", isDirectId = false)
-                            }
+                                val streamData = if (!cloudSong.youtubeId.isNullOrBlank()) {
+                                    extractAudio(cloudSong.youtubeId, isDirectId = true)
+                                } else {
+                                    extractAudio(
+                                        "${cloudSong.title} ${cloudSong.artist}",
+                                        isDirectId = false
+                                    )
+                                }
 
-                            if (streamData != null) {
-                                audioUri = streamData.url.toUri()
-                                streamHeaders = streamData.headers
+                                if (streamData != null) {
+                                    audioUri = streamData.url.toUri()
+                                    streamHeaders = streamData.headers
 
-                                lyricsList = cloudSong.syncedLyricsJson.toLyricsList()
-                                translatedLyrics = cloudSong.translatedLyricsJson.toLyricsList()
-                                currentTitle = cloudSong.title
-                                currentArtist = cloudSong.artist
-                                currentCover = cloudSong.coverUrl
+                                    lyricsList = cloudSong.syncedLyricsJson.toLyricsList()
+                                    translatedLyrics = cloudSong.translatedLyricsJson.toLyricsList()
+                                    currentTitle = cloudSong.title
+                                    currentArtist = cloudSong.artist
+                                    currentCover = cloudSong.coverUrl
 
-                                isFetching = false
-                                navController.navigate("player") { popUpTo("home") }
-                            } else {
-                                fetchError = "Could not connect to YouTube stream."
-                                isFetching = false
+                                    isFetching = false
+                                    navController.navigate("player") { popUpTo("home") }
+                                } else {
+                                    fetchError = "Could not connect to YouTube stream."
+                                    isFetching = false
+                                }
                             }
                         }
                     },
                     onArtistTrackSelected = { title, artist ->
-                        coroutineScope.launch {
-                            runFetchingPipeline(title, artist, fallbackFileName = title, isLocalFile = false)
+                        val isAlreadyPlaying = (title == currentTitle && artist == currentArtist)
+                        if (isAlreadyPlaying && audioUri != null) {
+                            navController.navigate("player") { popUpTo("home") }
+                        } else {
+                            coroutineScope.launch {
+                                runFetchingPipeline(
+                                    title,
+                                    artist,
+                                    fallbackFileName = title,
+                                    isLocalFile = false
+                                )
+                            }
                         }
-                    }
+                    },
+                    showMiniPlayer = audioUri != null,
+                    currentTitle,
+                    currentArtist,
+                    currentCover,
+                    playerState.isPlaying,
+                    onMiniPlayerClick = { navController.navigate("player") { popUpTo("home") } },
+                    onPlayPauseClick = { playerState.togglePlayPause() }
                 )
 
                 if (showOverrideDialog) {
@@ -390,7 +415,9 @@ fun TransLyrical() {
             }
         }
         composable("player") {
-            val playerState = rememberLyricPlayer(lyricsList, audioUri, streamHeaders)
+            val isSaved = uiState.songs.any {
+                it.youtubeId == currentYtId || (it.title == currentTitle && it.artist == currentArtist)
+            }
             LyricScreen(
                 playerState,
                 translatedLyrics,
@@ -398,7 +425,20 @@ fun TransLyrical() {
                 currentArtist,
                 currentCover,
                 audioUri,
-                streamHeaders
+                streamHeaders,
+                isSaved,
+                onSaveClick = {
+                    if (!isSaved) {
+                        cloudSongViewModel.uploadSong(
+                            currentYtId, currentTitle, currentArtist,currentCover, lyricsList, translatedLyrics
+                        )
+                        Toast.makeText(context, "Added to library!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        val songToDelete = uiState.songs.find { it.youtubeId == currentYtId || (it.title == currentTitle && it.artist == currentArtist) }
+                        songToDelete?.let { cloudSongViewModel.deleteSong(it.id) }
+                        Toast.makeText(context, "Removed from library!", Toast.LENGTH_SHORT).show()
+                    }
+                }
             )
         }
     }
@@ -411,7 +451,14 @@ fun MainScreen(
     onSearchRequested: (String, String) -> Unit,
     onAudioSelected: (Uri) -> Unit,
     onCloudSongSelected: (CloudSong) -> Unit,
-    onArtistTrackSelected: (String, String) -> Unit
+    onArtistTrackSelected: (String, String) -> Unit,
+    showMiniPlayer: Boolean,
+    currentTitle: String,
+    currentArtist: String,
+    currentCover: String?,
+    isPlaying: Boolean,
+    onMiniPlayerClick: () -> Unit,
+    onPlayPauseClick: () -> Unit
 ) {
     var currentTab by remember { mutableIntStateOf(0) }
 
@@ -437,54 +484,111 @@ fun MainScreen(
             }
         },
         bottomBar = {
-            NavigationBar(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .clip(RoundedCornerShape(24.dp)),
-                containerColor = Color(0xFF1E1E1E).copy(alpha = 0.9f),
-                tonalElevation = 0.dp
-            ) {
-                NavigationBarItem(
-                    icon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                    label = { Text("Stream") },
-                    selected = currentTab == 0,
-                    onClick = { currentTab = 0 },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color.White,
-                        selectedTextColor = Color.White,
-                        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                        unselectedIconColor = Color.Gray,
-                        unselectedTextColor = Color.Gray
-                    )
-                )
+            Column {
+                if (showMiniPlayer) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onMiniPlayerClick() },
+                        color = Color(0xFF2A2A2A)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (currentCover != null) {
+                                AsyncImage(
+                                    model = currentCover,
+                                    contentDescription = "Cover",
+                                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp))
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier.size(48.dp).background(Color.DarkGray, RoundedCornerShape(8.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = Color.White)
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
 
-                NavigationBarItem(
-                    icon = { Icon(Icons.Default.LibraryMusic, contentDescription = "Library") },
-                    label = { Text("Library") },
-                    selected = currentTab == 1,
-                    onClick = { currentTab = 1 },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color.White,
-                        selectedTextColor = Color.White,
-                        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                        unselectedIconColor = Color.Gray,
-                        unselectedTextColor = Color.Gray
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = currentTitle,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = currentArtist,
+                                    color = Color.LightGray,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            IconButton(onClick = onPlayPauseClick) {
+                                Icon(
+                                    imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                    contentDescription = "Play/Pause",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+                NavigationBar(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .clip(RoundedCornerShape(24.dp)),
+                    containerColor = Color(0xFF1E1E1E).copy(alpha = 0.9f),
+                    tonalElevation = 0.dp
+                ) {
+                    NavigationBarItem(
+                        icon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                        label = { Text("Stream") },
+                        selected = currentTab == 0,
+                        onClick = { currentTab = 0 },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color.White,
+                            selectedTextColor = Color.White,
+                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                            unselectedIconColor = Color.Gray,
+                            unselectedTextColor = Color.Gray
+                        )
                     )
-                )
 
-                NavigationBarItem(
-                    icon = { Icon(Icons.Default.Person, contentDescription = "Artists") },
-                    label = { Text("Artists") },
-                    selected = currentTab == 2,
-                    onClick = { currentTab = 2 },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = Color.White,
-                        selectedTextColor = Color.White,
-                        indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                        unselectedIconColor = Color.Gray,
-                        unselectedTextColor = Color.Gray
+                    NavigationBarItem(
+                        icon = { Icon(Icons.Default.LibraryMusic, contentDescription = "Library") },
+                        label = { Text("Library") },
+                        selected = currentTab == 1,
+                        onClick = { currentTab = 1 },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color.White,
+                            selectedTextColor = Color.White,
+                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                            unselectedIconColor = Color.Gray,
+                            unselectedTextColor = Color.Gray
+                        )
                     )
-                )
+
+                    NavigationBarItem(
+                        icon = { Icon(Icons.Default.Person, contentDescription = "Artists") },
+                        label = { Text("Artists") },
+                        selected = currentTab == 2,
+                        onClick = { currentTab = 2 },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color.White,
+                            selectedTextColor = Color.White,
+                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                            unselectedIconColor = Color.Gray,
+                            unselectedTextColor = Color.Gray
+                        )
+                    )
+                }
             }
         }
     ) { paddingValues ->
