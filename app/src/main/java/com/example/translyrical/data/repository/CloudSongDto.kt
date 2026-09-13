@@ -18,10 +18,12 @@ data class CloudSongDto(
     val coverUrl: String? = null,
     @SerialName("synced_lyrics_json")
     val syncedLyricsJson: String? = null,
-    @SerialName("translated_lyrics_json")
-    val translatedLyricsJson: String? = null,
+    @SerialName("translated_english_json")
+    val translatedEnglishJson: String? = null,
+    @SerialName("translated_hindi_json")
+    val translatedHindiJson: String? = null,
     @SerialName("timestamp")
-val timestamp: Long = 0L
+    val timestamp: Long = 0L
 ) {
     fun toDomain(): CloudSong {
         return CloudSong(
@@ -31,7 +33,8 @@ val timestamp: Long = 0L
             artist = artist,
             coverUrl = coverUrl,
             syncedLyricsJson = syncedLyricsJson,
-            translatedLyricsJson = translatedLyricsJson,
+            translatedEnglishJson = translatedEnglishJson,
+            translatedHindiJson = translatedHindiJson,
             timestamp = timestamp
         )
     }

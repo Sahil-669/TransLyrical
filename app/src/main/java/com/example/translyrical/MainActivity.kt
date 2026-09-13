@@ -8,12 +8,14 @@ import android.provider.OpenableColumns
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -63,6 +65,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -81,7 +84,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.translyrical.domain.CloudSong
@@ -108,9 +110,11 @@ import com.example.translyrical.data.repository.SpotifyRepository
 import com.example.translyrical.network.ITunesApi
 import com.example.translyrical.network.ITunesTrack
 import com.example.translyrical.network.LrcLibResponse
+import com.example.translyrical.ui.cleanTitle
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
@@ -146,7 +150,8 @@ fun TransLyrical() {
     var audioUri by remember { mutableStateOf<Uri?>(null) }
     var streamHeaders by remember { mutableStateOf<Map<String, String>?>(null) }
     var lyricsList by remember { mutableStateOf<List<LyricLine>>(emptyList()) }
-    var translatedLyrics by remember { mutableStateOf<List<LyricLine>?>(null) }
+    var translatedEnglish by remember { mutableStateOf<List<LyricLine>?>(null) }
+    var translatedHindi by remember { mutableStateOf<List<LyricLine>?>(null) }
     var isFetching by remember { mutableStateOf(false) }
     var currentTitle by remember { mutableStateOf("Unknown Track") }
     var currentArtist by remember { mutableStateOf("Unknown Artist") }
@@ -156,6 +161,7 @@ fun TransLyrical() {
     var showOverrideDialog by remember { mutableStateOf(false) }
     var editableTitle by remember { mutableStateOf("") }
     var editableArtist by remember { mutableStateOf("") }
+    var currentTranslationMode by remember { mutableIntStateOf(0) }
 
     val playerState = rememberLyricPlayer(lyricsList, audioUri, streamHeaders)
 
@@ -172,11 +178,16 @@ fun TransLyrical() {
         try {
             var streamUrl: String? = null
             var ytDuration = 0
-            var ytId: String? = null
+            var ytId: String?
+            val streamDeferred = coroutineScope.async(Dispatchers.IO) {
+                if (!isLocalFile) extractAudio("$searchTitle $searchArtist") else null
+            }
+            val spotifyDeferred = coroutineScope.async(Dispatchers.IO) {
+                spotifyRepository.fetchCoverArtAndMeta("$searchTitle $searchArtist")
+            }
+            val streamData = streamDeferred.await()
 
             if (!isLocalFile) {
-                val streamData = extractAudio("$searchTitle $searchArtist")
-
                 if (streamData == null) {
                     fetchError = "Could not find audio stream on YouTube."
                     isFetching = false
@@ -223,14 +234,27 @@ fun TransLyrical() {
                 return
             }
 
+            val spotifyMeta = spotifyDeferred.await()
             currentTitle = finalLrcResponse.trackName.ifBlank { currentTitle }
             currentArtist = finalLrcResponse.artistName.ifBlank { currentArtist }
-
-            val spotifyMeta = spotifyRepository.fetchCoverArtAndMeta("$currentTitle $currentArtist")
             currentCover = spotifyMeta?.coverArtUrl ?: currentCover
 
             lyricsList = LrcParser.parse(finalLrcResponse.syncedLyrics)
-            translatedLyrics = lyricTranslator.getFullSongTranslation(lyricsList)
+            translatedEnglish = null
+            translatedHindi = null
+
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val multiLang = lyricTranslator.getMultiLangTranslation(lyricsList)
+                    translatedEnglish = multiLang?.english
+                    translatedHindi = multiLang?.hindi
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Translations Loaded.", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Log.e("TransLyricalFetch", "Background translation failed", e)
+                }
+            }
 
             if (!isLocalFile) {
                 audioUri = streamUrl?.toUri()
@@ -263,7 +287,8 @@ fun TransLyrical() {
         }
         if (existingSong != null) {
             lyricsList = existingSong.syncedLyricsJson.toLyricsList()
-            translatedLyrics = existingSong.translatedLyricsJson.toLyricsList()
+            translatedEnglish = existingSong.translatedEnglishJson.toLyricsList()
+            translatedHindi = existingSong.translatedHindiJson.toLyricsList()
             currentTitle = existingSong.title
             currentArtist = existingSong.artist
             currentCover = existingSong.coverUrl
@@ -300,7 +325,8 @@ fun TransLyrical() {
                         audioUri = null
                         audioUri = selectedUri
                         lyricsList = emptyList()
-                        translatedLyrics = null
+                        translatedEnglish = null
+                        translatedHindi = null
                         currentCover = null
                         fetchError = null
                     },
@@ -327,7 +353,8 @@ fun TransLyrical() {
                                     streamHeaders = streamData.headers
 
                                     lyricsList = cloudSong.syncedLyricsJson.toLyricsList()
-                                    translatedLyrics = cloudSong.translatedLyricsJson.toLyricsList()
+                                    translatedEnglish = cloudSong.translatedEnglishJson.toLyricsList()
+                                    translatedHindi = cloudSong.translatedHindiJson.toLyricsList()
                                     currentTitle = cloudSong.title
                                     currentArtist = cloudSong.artist
                                     currentCover = cloudSong.coverUrl
@@ -420,17 +447,20 @@ fun TransLyrical() {
             }
             LyricScreen(
                 playerState,
-                translatedLyrics,
+                translatedEnglish,
+                translatedHindi,
                 currentTitle,
                 currentArtist,
                 currentCover,
                 audioUri,
                 streamHeaders,
                 isSaved,
+                translationMode = currentTranslationMode,
+                onTranslationModeChange = { currentTranslationMode = it },
                 onSaveClick = {
                     if (!isSaved) {
                         cloudSongViewModel.uploadSong(
-                            currentYtId, currentTitle, currentArtist,currentCover, lyricsList, translatedLyrics
+                            currentYtId, currentTitle, currentArtist,currentCover, lyricsList, translatedEnglish, translatedHindi
                         )
                         Toast.makeText(context, "Added to library!", Toast.LENGTH_SHORT).show()
                     } else {
@@ -516,18 +546,18 @@ fun MainScreen(
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = currentTitle,
+                                    text = currentTitle.cleanTitle(),
                                     color = Color.White,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    fontWeight = FontWeight.Medium
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.basicMarquee()
                                 )
                                 Text(
                                     text = currentArtist,
                                     color = Color.LightGray,
                                     fontSize = 12.sp,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    modifier = Modifier.basicMarquee()
                                 )
                             }
                             IconButton(onClick = onPlayPauseClick) {
@@ -1014,6 +1044,11 @@ fun ArtistScreen(
     var isLoading by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
+    BackHandler(enabled = tracks.isNotEmpty()) {
+        tracks = emptyList()
+        searchQuery = ""
+    }
+
     val placeholderArtists = listOf(
         "Arijit Singh", "The Weeknd", "Karan Aujla",
         "Mazzy Star", "Kanye West", "Radiohead"
@@ -1050,7 +1085,8 @@ fun ArtistScreen(
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { searchArtist(searchQuery) }),
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            shape = RoundedCornerShape(16.dp)
+            shape = RoundedCornerShape(16.dp),
+            colors = TextFieldDefaults.colors(focusedTextColor = Color.White, focusedContainerColor = Color.Black)
         )
         if (isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

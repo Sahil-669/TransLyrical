@@ -7,6 +7,7 @@ data class CloudSong(
     val artist: String,
     val coverUrl: String?,
     val syncedLyricsJson: String?,
-    val translatedLyricsJson: String?,
+    val translatedEnglishJson: String?,
+    val translatedHindiJson: String?,
     val timestamp: Long
 )

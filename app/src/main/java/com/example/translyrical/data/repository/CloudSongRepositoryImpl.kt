@@ -15,7 +15,8 @@ class CloudSongRepositoryImpl(
         artist: String,
         coverUrl: String?,
         syncedLyricsJson: String?,
-        translatedLyricsJson: String?
+        englishJson: String?,
+        hindiJson: String?
     ): Result<Unit> {
         return try {
             val songDto = CloudSongDto(
@@ -24,7 +25,8 @@ class CloudSongRepositoryImpl(
                 artist = artist,
                 coverUrl = coverUrl,
                 syncedLyricsJson = syncedLyricsJson,
-                translatedLyricsJson = translatedLyricsJson,
+                translatedEnglishJson = englishJson,
+                translatedHindiJson = hindiJson,
                 timestamp = System.currentTimeMillis()
             )
             supabase.postgrest["songs"].insert(songDto)

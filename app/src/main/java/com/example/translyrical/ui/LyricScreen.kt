@@ -3,7 +3,12 @@ package com.example.translyrical.ui
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -12,6 +17,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -75,13 +81,16 @@ import kotlin.math.max
 @Composable
 fun LyricScreen(
     playerState: LyricPlayerState,
-    translatedLyrics: List<LyricLine>?,
+    translatedEnglish: List<LyricLine>?,
+    translatedHindi: List<LyricLine>?,
     songTitle: String,
     artistName: String,
     coverArt: String?,
     audioUri: Uri?,
     streamHeaders: Map<String, String>?,
     isSaved: Boolean,
+    translationMode: Int,
+    onTranslationModeChange: (Int) -> Unit,
     onSaveClick: () -> Unit
 ) {
     val context = LocalContext.current
@@ -150,11 +159,18 @@ fun LyricScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = songTitle,
+                        text = songTitle.cleanTitle(),
+                        maxLines = 1,
                         color = Color.White,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .basicMarquee(
+                                iterations = Int.MAX_VALUE,
+                                velocity = 30.dp
+                            )
                     )
 
                     Text(
@@ -194,12 +210,16 @@ fun LyricScreen(
             ) {
                 itemsIndexed(playerState.lyricsList) { index, lyric ->
                     val isActive = (index == playerState.activeLyricIndex)
-                    val englishText = translatedLyrics?.getOrNull(index)?.text
+                    val activeTranslationText = when (translationMode) {
+                        1 -> translatedEnglish?.getOrNull(index)?.text
+                        2 -> translatedHindi?.getOrNull(index)?.text
+                        else -> null
+                    }
                     LyricRow(
                         lyric = lyric,
-                        translatedText = englishText,
+                        translatedText = activeTranslationText,
                         isActive = isActive,
-                        isTranslationToggledOn = isActive
+                        isTranslationToggledOn = isActive && translationMode != 0
                     )
                 }
             }
@@ -295,15 +315,30 @@ fun LyricScreen(
                             )
                         }
                     }
-                    IconButton(
-                        onClick = {},
-                        modifier = Modifier.size(48.dp)
+                    Box(
+                        modifier = Modifier.size(48.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Translate,
-                            contentDescription = "Translate Lyrics",
-                            tint = Color.White
-                        )
+                        if (translatedEnglish == null || translatedHindi == null) {
+                            JumpingDots()
+                        } else {
+                            IconButton(
+                                onClick = {
+                                    onTranslationModeChange((translationMode + 1) % 3)
+                                },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Translate,
+                                    contentDescription = "Translate Lyrics",
+                                    tint = when (translationMode) {
+                                        1 -> MaterialTheme.colorScheme.primary
+                                        2 -> Color(0xFF4CAF50)
+                                        else -> Color.White
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -378,3 +413,50 @@ fun formatTimestamp(ms: Long): String {
     return String.format(Locale.US,"%02d:%02d", minutes, seconds)
 }
 
+@Composable
+fun JumpingDots(modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "jumpingDots")
+
+    val dots = List(3) { index ->
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 0f,
+            animationSpec = infiniteRepeatable(
+                animation = keyframes {
+                    durationMillis = 1000
+                    0f at 0
+                    (-16f) at 250
+                    0f at 500
+                    0f at 1000
+                },
+                initialStartOffset = StartOffset(offsetMillis = index * 100)
+            ),
+            label = "dot$index"
+        )
+    }
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        dots.forEach { dot ->
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .graphicsLayer { translationY = dot.value }
+                    .background(Color.White, CircleShape)
+            )
+        }
+    }
+}
+
+fun String.cleanTitle() : String {
+    return this
+        .replace(Regex("(?i)[(\\[].*?(official|lyric|video|audio).*?[)\\]]"), "")
+        .substringAfter(" - ")
+        .trim()
+        .removeSurrounding("\"")
+        .removeSurrounding("'")
+        .removeSurrounding("“", "”")
+        .trim()
+}

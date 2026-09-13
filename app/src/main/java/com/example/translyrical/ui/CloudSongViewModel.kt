@@ -56,7 +56,8 @@ class CloudSongViewModel(
         artist: String,
         coverUrl: String?,
         syncedLyrics: List<LyricLine>,
-        translatedLyrics: List<LyricLine>?
+        translatedEnglish: List<LyricLine>?,
+        translatedHindi: List<LyricLine>?
         ) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
@@ -70,7 +71,8 @@ class CloudSongViewModel(
                 return@launch
             }
             val syncedJson = gson.toJson(syncedLyrics)
-            val translatedJson = translatedLyrics?.let { gson.toJson(it) }
+            val englishJson = translatedEnglish?.let { gson.toJson(it) }
+            val hindiJson = translatedHindi?.let { gson.toJson(it) }
 
             repository.uploadCloudSong(
                 youtubeId,
@@ -78,7 +80,8 @@ class CloudSongViewModel(
                 artist,
                 coverUrl,
                 syncedJson,
-                translatedJson
+                englishJson,
+                hindiJson
             ).fold(
                 onSuccess = {
                     loadSongs()
