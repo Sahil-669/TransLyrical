@@ -8,9 +8,7 @@ A modern Android application designed to fetch, display, and translate song lyri
 
 | Now Playing | Library | Search |
 |:---:|:---:|:---:|
-| ![Screen 1](screenshots/now_playing.png) | ![Screen 2](screenshots/library.png) | ![Screen 3](screenshots/search.png) |
-
-> *Tip: Place a short screen recording GIF here if available.*
+| ![Screen 1](Screenshots/now_playing.png) | ![Screen 2](Screenshots/library.png) | ![Screen 3](Screenshots/search.png) |
 
 ---
 
