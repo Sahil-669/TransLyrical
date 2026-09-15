@@ -32,7 +32,7 @@ The project adheres to **MVVM + Clean Architecture** guidelines to ensure separa
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 * Android Studio Hedgehog | 2023.1.1 or newer
