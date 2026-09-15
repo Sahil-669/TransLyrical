@@ -21,7 +21,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.example.translyrical"
+        applicationId = "dev.sahil.translyrical"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
