@@ -244,15 +244,17 @@ fun TransLyrical() {
             translatedHindi = null
 
             coroutineScope.launch(Dispatchers.IO) {
-                try {
-                    val multiLang = lyricTranslator.getMultiLangTranslation(lyricsList)
-                    translatedEnglish = multiLang?.english
-                    translatedHindi = multiLang?.hindi
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Translations Loaded.", Toast.LENGTH_SHORT).show()
+                val translation = lyricTranslator.getMultiLangTranslation(lyricsList)
+                withContext(Dispatchers.Main) {
+                    if (translation != null) {
+                        translatedEnglish = translation.english
+                        translatedHindi = translation.hindi
+                        Toast.makeText(context, "Translations Loaded", Toast.LENGTH_SHORT).show()
+                    } else {
+                        translatedEnglish = emptyList()
+                        translatedHindi = emptyList()
+                        Toast.makeText(context, "AI is currently busy. Please try again later.", Toast.LENGTH_LONG).show()
                     }
-                } catch (e: Exception) {
-                    Log.e("TransLyricalFetch", "Background translation failed", e)
                 }
             }
 
@@ -775,7 +777,7 @@ fun SongListItem(song: CloudSong, onClick: () -> Unit, onDeleteClick: () -> Unit
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = song.title,
+                text = song.title.cleanTitle(),
                 style = MaterialTheme.typography.titleMedium,
                 color = Color.White
             )

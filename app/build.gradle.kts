@@ -32,11 +32,16 @@ android {
         buildConfigField("String", "SPOTIFY_CLIENT_SECRET", "\"$spotifySecret\"")
         buildConfigField("String", "SUPABASE_KEY_SECRET", "\"$supabaseKey\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiKey\"")
+
+        ndk {
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

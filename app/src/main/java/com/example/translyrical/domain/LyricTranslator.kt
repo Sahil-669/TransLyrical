@@ -27,11 +27,14 @@ class LyricTranslator (
     suspend fun getMultiLangTranslation(originalLyrics: List<LyricLine>): MultiLangTranslation? {
         if (originalLyrics.isEmpty()) return null
 
-        val rawLyricsText = originalLyrics.joinToString("\n") { it.text }
+        val rawLyricsText = originalLyrics.joinToString("\n") {
+            it.text.ifBlank { "[INSTRUMENTAL]" }
+        }
 
         val promptText = """
             You are a professional music translator. Translate the following lyrics into both English and Hindi.
             Return ONLY a valid JSON object with two arrays of strings, matching the exact number of lines provided.
+            If a line contains exactly "[INSTRUMENTAL]", keep it exactly as "[INSTRUMENTAL]" in your translation arrays to maintain the correct line count.
             Do not include markdown blocks or any other text.
             Format:
             {
@@ -45,34 +48,47 @@ class LyricTranslator (
         val request = GeminiRequest(
             contents = listOf(GeminiContent(listOf(GeminiPart(promptText))))
         )
-        return try {
-            val response = geminiApi.translateLyrics(BuildConfig.GEMINI_API_KEY, request)
-            var responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-            if (responseText.isNullOrBlank()) return null
-            responseText = responseText.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-            val parsedJson = gson.fromJson(responseText, GeminiTranslationResponse::class.java)
-            val englishLines = parsedJson.english?.mapIndexed { index, text ->
-                LyricLine(
-                    startTimeMs = originalLyrics.getOrNull(index)?.startTimeMs ?: 0L,
-                    text = text
-                )
-            }
+        val modelCascade = listOf(
+            "gemini-3.8-flash",
+            "gemini-3.5-flash-lite"
+        )
+        for (modelName in modelCascade) {
+            try {
+                val response = geminiApi.translateLyrics(modelName, BuildConfig.GEMINI_API_KEY,request)
+                var responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                if (responseText.isNullOrBlank()) continue
+                responseText = responseText.removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+                val parsedJson = gson.fromJson(responseText, GeminiTranslationResponse::class.java)
 
-            val hindiLines = parsedJson.hindi?.mapIndexed { index, text ->
-                LyricLine(
-                    startTimeMs = originalLyrics.getOrNull(index)?.startTimeMs ?: 0L,
-                    text = text
-                )
-            }
+                if (parsedJson.english == null || parsedJson.hindi == null) continue
 
-            MultiLangTranslation(englishLines, hindiLines)
-        } catch (e: retrofit2.HttpException) {
-            val errorBody = e.response()?.errorBody()?.string()
-            Log.e("LyricTranslator", "Gemini HTTP ${e.code()}: $errorBody")
-            null
-        } catch (e: Exception) {
-            Log.e("LyricTranslator", "Gemini API failed", e)
-            null
+                val englishLines = parsedJson.english.mapIndexed { index, text ->
+                    val cleanText = if (text.contains("[INSTRUMENTAL]")) "" else text
+                    LyricLine(
+                        startTimeMs = originalLyrics.getOrNull(index)?.startTimeMs ?: 0L,
+                        text = cleanText
+                    )
+                }
+
+                val hindiLines = parsedJson.hindi.mapIndexed { index, text ->
+                    val cleanText = if (text.contains("[INSTRUMENTAL]")) "" else text
+                    LyricLine(
+                        startTimeMs = originalLyrics.getOrNull(index)?.startTimeMs ?: 0L,
+                        text = cleanText
+                    )
+                }
+
+                return MultiLangTranslation(englishLines, hindiLines)
+            } catch (e: retrofit2.HttpException) {
+                val errorBody = e.response()?.errorBody()?.string()
+                Log.e("LyricTranslator", "$modelName HTTP ${e.code()}: $errorBody")
+                Log.w("LyricTranslator", "Routing failed for $modelName. Falling back to next model...")
+                continue
+            } catch (e: Exception) {
+                Log.e("LyricTranslator", "$modelName failed", e)
+                continue
+            }
         }
+        return null
     }
 }
