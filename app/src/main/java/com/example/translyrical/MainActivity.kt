@@ -36,7 +36,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -44,29 +43,33 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -94,7 +97,6 @@ import com.example.translyrical.parser.LyricLine
 import com.example.translyrical.player.rememberLyricPlayer
 import com.example.translyrical.ui.CloudSongViewModel
 import com.example.translyrical.ui.LyricScreen
-import com.example.translyrical.ui.RippleBackground
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.launch
@@ -476,7 +478,7 @@ fun TransLyrical() {
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
     cloudViewModel: CloudSongViewModel,
@@ -493,6 +495,10 @@ fun MainScreen(
     onPlayPauseClick: () -> Unit
 ) {
     var currentTab by remember { mutableIntStateOf(0) }
+    var showPreciseSearchDialog by remember { mutableStateOf(false) }
+
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val coroutineScope = rememberCoroutineScope()
 
     val audioPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -502,26 +508,118 @@ fun MainScreen(
         }
     }
 
-    Scaffold(
-        containerColor = Color.Black,
-        floatingActionButton = {
-            if (currentTab == 1) {
-                FloatingActionButton(
-                    onClick = { audioPickerLauncher.launch("audio/*") },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    shape = CircleShape
-                ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = "Add MP3")
-                }
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = Color(0xFF121212),
+                modifier = Modifier.width(300.dp)
+            ) {
+                Spacer(modifier = Modifier.height(32.dp))
+                Text(
+                    text = "TransLyrical",
+                    color = Color.White,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 24.dp, bottom = 32.dp)
+                )
+
+                NavigationDrawerItem(
+                    icon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    label = { Text("Discover") },
+                    selected = currentTab == 0,
+                    onClick = {
+                        currentTab = 0
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    colors = NavigationDrawerItemDefaults.colors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                        unselectedContainerColor = Color.Transparent,
+                        selectedTextColor = Color.White,
+                        unselectedTextColor = Color.LightGray,
+                        selectedIconColor = Color.White,
+                        unselectedIconColor = Color.LightGray
+                    ),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+                NavigationDrawerItem(
+                    icon = { Icon(Icons.Default.LibraryMusic, contentDescription = null) },
+                    label = { Text("Your Library") },
+                    selected = currentTab == 1,
+                    onClick = {
+                        currentTab = 1
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    colors = NavigationDrawerItemDefaults.colors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                        unselectedContainerColor = Color.Transparent,
+                        selectedTextColor = Color.White,
+                        unselectedTextColor = Color.LightGray,
+                        selectedIconColor = Color.White,
+                        unselectedIconColor = Color.LightGray
+                    ),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                )
+                Spacer(modifier = Modifier.weight(1f))
+
+                NavigationDrawerItem(
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    label = { Text("Precise Search") },
+                    selected = false,
+                    onClick = {
+                        showPreciseSearchDialog = true
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    colors = NavigationDrawerItemDefaults.colors(
+                        unselectedTextColor = Color.LightGray,
+                        unselectedIconColor = Color.LightGray
+                    ),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+                NavigationDrawerItem(
+                    icon = { Icon(Icons.Rounded.MusicNote, contentDescription = null) },
+                    label = { Text("Load Local MP3") },
+                    selected = false,
+                    onClick = {
+                        audioPickerLauncher.launch("audio/*")
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    colors = NavigationDrawerItemDefaults.colors(
+                        unselectedTextColor = Color.LightGray,
+                        unselectedIconColor = Color.LightGray
+                    ),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 24.dp)
+                )
             }
-        },
-        bottomBar = {
-            Column {
+        }
+    ) {
+        Scaffold(
+            containerColor = Color.Black,
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = if (currentTab == 0) "Discover" else "Library",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { coroutineScope.launch { drawerState.open() } }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Open Menu", tint = Color.White)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Black
+                    )
+                )
+            },
+            bottomBar = {
                 if (showMiniPlayer) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .padding(horizontal = 16.dp, vertical = 16.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .clickable { onMiniPlayerClick() },
                         color = Color(0xFF2A2A2A)
@@ -572,108 +670,31 @@ fun MainScreen(
                         }
                     }
                 }
-                NavigationBar(
-                    modifier = Modifier
-                        .padding(16.dp)
-                        .clip(RoundedCornerShape(24.dp)),
-                    containerColor = Color(0xFF1E1E1E).copy(alpha = 0.9f),
-                    tonalElevation = 0.dp
-                ) {
-                    NavigationBarItem(
-                        icon = { Icon(Icons.Default.Search, contentDescription = "Search") },
-                        label = { Text("Stream") },
-                        selected = currentTab == 0,
-                        onClick = { currentTab = 0 },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color.White,
-                            selectedTextColor = Color.White,
-                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                            unselectedIconColor = Color.Gray,
-                            unselectedTextColor = Color.Gray
-                        )
-                    )
-
-                    NavigationBarItem(
-                        icon = { Icon(Icons.Default.LibraryMusic, contentDescription = "Library") },
-                        label = { Text("Library") },
-                        selected = currentTab == 1,
-                        onClick = { currentTab = 1 },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color.White,
-                            selectedTextColor = Color.White,
-                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                            unselectedIconColor = Color.Gray,
-                            unselectedTextColor = Color.Gray
-                        )
-                    )
-
-                    NavigationBarItem(
-                        icon = { Icon(Icons.Default.Person, contentDescription = "Artists") },
-                        label = { Text("Artists") },
-                        selected = currentTab == 2,
-                        onClick = { currentTab = 2 },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color.White,
-                            selectedTextColor = Color.White,
-                            indicatorColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                            unselectedIconColor = Color.Gray,
-                            unselectedTextColor = Color.Gray
-                        )
+            }
+        ) { paddingValues ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            ) {
+                when (currentTab) {
+                    0 -> ArtistScreen(onArtistTrackSelected)
+                    1 -> LibraryScreen(
+                        viewModel = cloudViewModel,
+                        onCloudSongSelected = onCloudSongSelected,
+                        onDeleteSong = { cloudSong -> cloudViewModel.deleteSong(cloudSong.id) }
                     )
                 }
             }
-        }
-    ) { paddingValues ->
-        Box(
-            modifier = Modifier.fillMaxSize().padding(paddingValues)
-        ) {
-            when (currentTab) {
-                0 -> HomeScreen(onSearchRequested)
-                1 -> LibraryScreen(
-                    cloudViewModel,
-                    onCloudSongSelected,
-                    onDeleteSong = { cloudSong ->
-                        cloudViewModel.deleteSong(cloudSong.id)
+            if (showPreciseSearchDialog) {
+                StreamSearchDialog(
+                    onDismiss = { showPreciseSearchDialog = false },
+                    onSearch = { title, artist ->
+                        showPreciseSearchDialog = false
+                        onSearchRequested(title, artist)
                     }
                 )
-                2 -> ArtistScreen(onArtistTrackSelected)
             }
-        }
-    }
-}
-
-@Composable
-fun HomeScreen(onSearchRequested: (String, String) -> Unit) {
-    var showSearchDialog by remember { mutableStateOf(false) }
-
-    RippleBackground(iconRes = 0) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            IconButton(
-                onClick = { showSearchDialog = true },
-                modifier = Modifier
-                    .size(96.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.15f))
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search & Stream",
-                    tint = Color.White,
-                    modifier = Modifier.size(48.dp)
-                )
-            }
-        }
-        if (showSearchDialog) {
-            StreamSearchDialog(
-                onDismiss = { showSearchDialog = false },
-                onSearch = { title, artist ->
-                    showSearchDialog = false
-                    onSearchRequested(title, artist)
-                }
-            )
         }
     }
 }
