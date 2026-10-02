@@ -172,7 +172,7 @@ fun LyricScreen(
                                 velocity = 30.dp
                             )
                     )
-
+                    Spacer(modifier = Modifier.height(5.dp))
                     Text(
                         text = artistName,
                         color = Color.LightGray,

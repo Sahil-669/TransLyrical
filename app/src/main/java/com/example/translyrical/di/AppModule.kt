@@ -1,12 +1,13 @@
 package com.example.translyrical.di
 
+import androidx.room.Room
 import com.example.translyrical.BuildConfig
+import com.example.translyrical.data.local.AppDatabase
 import com.example.translyrical.data.repository.CloudSongRepository
 import com.example.translyrical.data.repository.CloudSongRepositoryImpl
 import com.example.translyrical.data.repository.SpotifyRepository
 import com.example.translyrical.domain.LyricTranslator
 import com.example.translyrical.network.GeminiApi
-import com.example.translyrical.network.ITunesApi
 import com.example.translyrical.network.LrcLibApi
 import com.example.translyrical.network.SpotifyAuthApi
 import com.example.translyrical.network.SpotifySearchApi
@@ -17,6 +18,7 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.storage.Storage
 import okhttp3.OkHttpClient
+import org.koin.android.ext.koin.androidContext
 import org.koin.dsl.module
 import org.koin.core.module.dsl.viewModel
 import retrofit2.Retrofit
@@ -87,16 +89,16 @@ val appModule = module {
             .create(GeminiApi::class.java)
     }
 
-    single<ITunesApi> {
-        Retrofit.Builder()
-            .baseUrl("https://itunes.apple.com/")
-            .client(get<OkHttpClient>())
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(ITunesApi::class.java)
+    single {
+        Room.databaseBuilder(
+            androidContext(),
+            AppDatabase::class.java,
+            "translyrical_db"
+        ).build()
     }
 
     single { LyricTranslator(get()) }
     single<CloudSongRepository> { CloudSongRepositoryImpl(get()) }
+    single { get<AppDatabase>().recentSongDao() }
     viewModel { CloudSongViewModel(get()) }
 }

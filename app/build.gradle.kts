@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 val keystorePropertiesFile = rootProject.file("local.properties")
@@ -95,4 +96,6 @@ dependencies {
     implementation(libs.supabase.postgrest)
     implementation(libs.kotlinx.serialization)
     implementation(libs.navigation.compose)
+    implementation(libs.bundles.local)
+    ksp(libs.androidx.room.compiler)
 }

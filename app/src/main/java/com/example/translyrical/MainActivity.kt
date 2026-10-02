@@ -32,10 +32,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -46,6 +48,7 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayCircleFilled
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.BasicAlertDialog
@@ -82,8 +85,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -108,9 +115,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import coil3.compose.AsyncImage
+import com.example.translyrical.data.local.RecentSong
+import com.example.translyrical.data.local.RecentSongDao
 import com.example.translyrical.data.repository.SpotifyRepository
-import com.example.translyrical.network.ITunesApi
-import com.example.translyrical.network.ITunesTrack
+import com.example.translyrical.data.repository.SpotifyTrack
 import com.example.translyrical.network.LrcLibResponse
 import com.example.translyrical.ui.cleanTitle
 import com.yausername.youtubedl_android.YoutubeDL
@@ -147,6 +155,7 @@ fun TransLyrical() {
     val cloudSongViewModel = koinViewModel<CloudSongViewModel>()
     val uiState by cloudSongViewModel.uiState.collectAsState()
     val navController = rememberNavController()
+    val recentSongDao = koinInject<RecentSongDao>()
     val coroutineScope = rememberCoroutineScope()
 
     var audioUri by remember { mutableStateOf<Uri?>(null) }
@@ -264,6 +273,18 @@ fun TransLyrical() {
                 audioUri = streamUrl?.toUri()
             } else {
                 streamHeaders = null
+            }
+
+            coroutineScope.launch(Dispatchers.IO) {
+                recentSongDao.insertOrUpdate(
+                    RecentSong(
+                        uniqueId = "${currentTitle.trim().lowercase()}-${currentArtist.trim().lowercase()}",
+                        title = currentTitle,
+                        artist = currentArtist,
+                        coverUrl = currentCover,
+                        timestamp = System.currentTimeMillis()
+                    )
+                )
             }
 
             isFetching = false
@@ -610,8 +631,7 @@ fun MainScreen(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Black
-                    )
+                        containerColor = if (currentTab == 0) Color(0xFF2B2B2B) else Color.Black                    )
                 )
             },
             bottomBar = {
@@ -1057,14 +1077,21 @@ fun StreamSearchDialog(
     }
 }
 
+data class PlaceholderArtist(val name: String, val imageUrl: String)
+
 @Composable
 fun ArtistScreen(
     onTrackSelected: (String, String) -> Unit,
-    iTunesApi: ITunesApi = koinInject()
+    spotifyRepo: SpotifyRepository = koinInject(),
+    recentSongDao: RecentSongDao = koinInject()
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var tracks by remember { mutableStateOf<List<ITunesTrack>>(emptyList()) }
+    var tracks by remember { mutableStateOf<List<SpotifyTrack>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
+
+    val recentSongs by recentSongDao.getRecentSongs().collectAsState(initial = emptyList())
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
 
     BackHandler(enabled = tracks.isNotEmpty()) {
@@ -1073,8 +1100,15 @@ fun ArtistScreen(
     }
 
     val placeholderArtists = listOf(
-        "Arijit Singh", "The Weeknd", "Karan Aujla",
-        "Mazzy Star", "Kanye West", "Radiohead"
+        PlaceholderArtist("Arijit Singh", "https://i.scdn.co/image/ab6761610000e5ebadfb0b2df04b77e43b5f7375"),
+        PlaceholderArtist("The Weeknd", "https://i.scdn.co/image/ab6761610000e5ebc1719ac9e6a75c1c25835018"),
+        PlaceholderArtist("Karan Aujla", "https://i.scdn.co/image/ab6761610000e5eb5bc8823f5e12458215d64678"),
+        PlaceholderArtist("Mazzy Star", "https://i.scdn.co/image/ab6772690000c46c93b4c6192035c98af64d4da3"),
+        PlaceholderArtist("Kanye West", "https://i.scdn.co/image/ab6761610000e5eb6e835a500e791bf9c27a422a"),
+        PlaceholderArtist("Radiohead", "https://i.scdn.co/image/ab6761610000e5eb959527d2fabc9c64287e57b9"),
+        PlaceholderArtist("Taylor Swift", "https://i.scdn.co/image/ab6761610000e5eb12184bdd29403de54cb9d9c7"),
+        PlaceholderArtist("Kendrick Lamar", "https://i.scdn.co/image/ab6761610000e5eb39ba6dcd4355c03de0b50918"),
+        PlaceholderArtist("Diljit Dosanjh", "https://i.scdn.co/image/ab6761610000e5ebfc043bea91ac91c222d235c9")
     )
 
     fun searchArtist(query: String) {
@@ -1082,93 +1116,208 @@ fun ArtistScreen(
         coroutineScope.launch {
             isLoading = true
             try {
-                val response = withContext(Dispatchers.IO) {
-                    iTunesApi.getArtistTracks(query)
+                val results = withContext(Dispatchers.IO) {
+                    spotifyRepo.searchTracks(query)
                 }
-                tracks = response.results.distinctBy { it.trackName }
+                tracks = results.distinctBy { it.trackName }
             } catch (e: Exception) {
-                Log.e("ITunes", "Failed to fetch tracks", e)
+                Log.e("SpotifySearch", "Failed to fetch tracks", e)
             } finally {
                 isLoading = false
             }
         }
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(top = 16.dp, start = 20.dp, end = 20.dp)
-    ) {
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Search any artist...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { searchArtist(searchQuery) }),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = TextFieldDefaults.colors(focusedTextColor = Color.White, focusedContainerColor = Color.Black)
-        )
-        if (isLoading) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Color.White)
-            }
-        } else if (tracks.isEmpty()) {
-            Text(
-                text = "Trending",
-                style = MaterialTheme.typography.titleMedium,
-                color = Color.White,
-                modifier = Modifier.padding(bottom = 12.dp, top = 8.dp)
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF2B2B2B),
+                        Color.Black
+                    )
+                )
             )
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(placeholderArtists) { artist ->
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(64.dp)
-                            .clickable {
-                                searchQuery = artist
-                                searchArtist(artist)
-                            },
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color.White.copy(alpha = 0.1f)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(artist, color = Color.White, fontWeight = FontWeight.Medium)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 16.dp, start = 20.dp, end = 20.dp)
+        ) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("What do you want to listen to...", color = Color.Gray) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.White) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = {
+                    searchArtist(searchQuery)
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                }),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = TextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedContainerColor = Color.White.copy(alpha = 0.1f),
+                    unfocusedContainerColor = Color.White.copy(alpha = 0.1f),
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent
+                )
+            )
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color.White)
+                }
+            } else if (tracks.isEmpty()) {
+                Text(
+                    text = "Artists",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 12.dp, top = 8.dp)
+                )
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(placeholderArtists) { artist ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    searchQuery = artist.name
+                                    searchArtist(artist.name)
+                                }
+                        ) {
+                            AsyncImage(
+                                model = artist.imageUrl,
+                                contentDescription = artist.name,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(80.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.DarkGray)
+
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = artist.name,
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                textAlign = TextAlign.Center
+                            )
                         }
                     }
                 }
-            }
-        } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(bottom = 100.dp)
-            ) {
-                items(tracks) { track ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White.copy(alpha = 0.05f))
-                            .clickable { onTrackSelected(track.trackName, track.artistName) }
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                if (recentSongs.isNotEmpty()) {
+                    Text(
+                        text = "Recently Played",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 32.dp, bottom = 16.dp)
+                    )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        AsyncImage(
-                            model = track.artworkUrl100,
-                            contentDescription = "Cover",
-                            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp))
-                        )
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(track.trackName, color = Color.White, fontWeight = FontWeight.Bold)
-                            Text(track.artistName, color = Color.LightGray, fontSize = 14.sp)
+                        items(recentSongs) { song ->
+                            Column(
+                                modifier = Modifier
+                                    .width(110.dp)
+                                    .clickable {
+                                        onTrackSelected(song.title, song.artist)
+                                    }
+                            ) {
+                                AsyncImage(
+                                    model = song.coverUrl,
+                                    contentDescription = "Cover",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(110.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.DarkGray)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = song.title,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    modifier = Modifier.basicMarquee()
+                                )
+                                Text(
+                                    text = song.artist,
+                                    color = Color.Gray,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    modifier = Modifier.basicMarquee()
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text(
+                    text = "Top Results",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(bottom = 100.dp)
+                ) {
+                    items(tracks) { track ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .clickable { onTrackSelected(track.trackName, track.artistName) }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                AsyncImage(
+                                    model = track.artworkUrl,
+                                    contentDescription = "Cover",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(4.dp))
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    track.trackName,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = track.artistName,
+                                        color = Color.Gray,
+                                        fontSize = 13.sp,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.Default.PlayCircleFilled,
+                                contentDescription = "Play",
+                                tint = Color.White.copy(alpha = .5f),
+                                modifier = Modifier.size(32.dp)
+                            )
                         }
                     }
                 }
